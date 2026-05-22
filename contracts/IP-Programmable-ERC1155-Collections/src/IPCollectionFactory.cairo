@@ -9,6 +9,7 @@ pub mod IPCollectionFactory {
     use starknet::storage::{StoragePointerReadAccess, StoragePointerWriteAccess};
     use starknet::syscalls::deploy_syscall;
     use starknet::{ClassHash, ContractAddress, get_caller_address, SyscallResultTrait};
+    use core::num::traits::Zero;
     use core::poseidon::PoseidonTrait;
     use core::hash::{HashStateTrait, HashStateExTrait};
     use crate::interfaces::IIPCollectionFactory::IIPCollectionFactory;
@@ -36,6 +37,7 @@ pub mod IPCollectionFactory {
         #[flat]
         OwnableEvent: OwnableComponent::Event,
         CollectionDeployed: CollectionDeployed,
+        CollectionClassHashUpdated: CollectionClassHashUpdated,
     }
 
     /// Emitted each time a new IPCollection is deployed via `deploy_collection`.
@@ -50,6 +52,13 @@ pub mod IPCollectionFactory {
         pub base_uri: ByteArray,
     }
 
+    /// Emitted when the factory owner updates the class hash used for future deployments.
+    #[derive(Drop, starknet::Event)]
+    pub struct CollectionClassHashUpdated {
+        pub previous_class_hash: ClassHash,
+        pub new_class_hash: ClassHash,
+    }
+
     /// Deploys a new IPCollectionFactory.
     ///
     /// # Arguments
@@ -61,6 +70,8 @@ pub mod IPCollectionFactory {
         owner: ContractAddress,
         collection_class_hash: ClassHash,
     ) {
+        assert(!owner.is_zero(), 'Owner is zero address');
+        assert(collection_class_hash.into() != 0_felt252, 'Class hash is zero');
         self.ownable.initializer(owner);
         self.ip_collection_class_hash.write(collection_class_hash);
         // deploy_nonce defaults to 0 — no explicit write needed
@@ -72,9 +83,23 @@ pub mod IPCollectionFactory {
             self.ip_collection_class_hash.read()
         }
 
+        fn version(self: @ContractState) -> ByteArray {
+            "0.2.0"
+        }
+
         fn update_collection_class_hash(ref self: ContractState, new_class_hash: ClassHash) {
             self.ownable.assert_only_owner();
+            assert(new_class_hash.into() != 0_felt252, 'Class hash is zero');
+
+            let previous_class_hash = self.ip_collection_class_hash.read();
             self.ip_collection_class_hash.write(new_class_hash);
+            self
+                .emit(
+                    CollectionClassHashUpdated {
+                        previous_class_hash,
+                        new_class_hash,
+                    },
+                );
         }
 
         fn deploy_collection(

@@ -11,8 +11,12 @@ pub trait IIPCollectionFactory<TContractState> {
     /// Returns the class hash used to deploy new collections.
     fn collection_class_hash(self: @TContractState) -> ClassHash;
 
+    /// Returns the immutable implementation version for this deployed factory class.
+    fn version(self: @TContractState) -> ByteArray;
+
     /// Updates the class hash for future collection deployments.
     /// Factory owner only. Does not affect already-deployed collections.
+    /// Emits `CollectionClassHashUpdated`.
     fn update_collection_class_hash(ref self: TContractState, new_class_hash: ClassHash);
 
     /// Deploys a new IPCollection instance.

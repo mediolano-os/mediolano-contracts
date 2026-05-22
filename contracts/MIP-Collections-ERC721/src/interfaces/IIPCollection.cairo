@@ -21,12 +21,12 @@ pub trait IIPCollection<ContractState> {
 
     /// Mints a new token in the specified `collection_id` and assigns it to the `recipient`.
     /// Only the collection owner can mint.
-    /// Token IDs start at 1. The `token_uri` must be a content-addressed URI (ipfs:// or ar://).
+    /// Token IDs start at 1. The `token_uri` is stored permanently and must not be empty.
     ///
     /// # Arguments
     /// * `collection_id` - The identifier of the collection to mint in.
     /// * `recipient` - The address to receive the newly minted token.
-    /// * `token_uri` - The content-addressed URI metadata for the token.
+    /// * `token_uri` - The immutable metadata URI/string for the token.
     ///
     /// # Returns
     /// The unique identifier (`u256`) of the minted token.
@@ -44,7 +44,7 @@ pub trait IIPCollection<ContractState> {
     /// # Arguments
     /// * `collection_id` - The identifier of the collection to mint in.
     /// * `recipients` - Array of addresses to receive the newly minted tokens.
-    /// * `token_uris` - Array of content-addressed URIs for each token (must match recipients length).
+    /// * `token_uris` - Array of immutable metadata URI strings for each token.
     ///
     /// # Returns
     /// A Span of token IDs (`u256`) for the minted tokens.

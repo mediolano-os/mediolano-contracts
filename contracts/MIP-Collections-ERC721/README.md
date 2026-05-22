@@ -15,6 +15,8 @@ The two-contract architecture is intentional:
 
 Both contracts are deployed once and never upgraded. There is no owner-only upgrade path, no mutable NFT class hash, and no collection pause switch.
 
+Security invariants are deliberately small: constructor inputs are validated, minting is collection-owner gated, token metadata pointers are immutable and capped at 2048 bytes, and creator/timestamp provenance is written once and never rewritten.
+
 ## Architecture
 
 ```
@@ -71,7 +73,7 @@ struct TokenData {
     token_id: u256,
     owner: ContractAddress,
     metadata_uri: ByteArray,
-    original_creator: ContractAddress,  // immutable — Berne Convention record
+    original_creator: ContractAddress,  // immutable creator/author — Berne Convention record
     registered_at: u64,                 // immutable — proof of creation date
 }
 ```
@@ -106,6 +108,12 @@ fn list_user_tokens_per_collection(collection_id, user) -> Span<u256>
 
 There are no admin or upgrade entrypoints.
 
+## Minting And Provenance
+
+Only the collection owner can mint. The `recipient` receives the ERC-721 token, while the caller is recorded as the immutable `original_creator` / author for the token. This keeps custody and authorship separate: tokens can be minted directly to another wallet without rewriting the legal provenance record.
+
+Each mint writes the token URI, original creator, and registration timestamp exactly once. Later transfers, protocol-routed transfers, and collection ownership transfers do not modify those fields.
+
 ## Events
 
 | Event | Key fields |
@@ -137,7 +145,9 @@ Indexers that need complete transfer history should subscribe to both native `IP
 
 ## Metadata URI Semantics
 
-Each minted token stores an immutable per-token `metadata_uri` and `token_uri()` / `tokenURI()` return that value directly. The collection `base_uri` is informational collection metadata; it is not concatenated with token IDs.
+Each minted token stores an immutable per-token `metadata_uri` and `token_uri()` / `tokenURI()` return that value directly. Token metadata strings are protocol-neutral: they must be non-empty and no longer than 2048 bytes, but are not restricted to any URI scheme. The collection `base_uri` is informational collection metadata; it is not concatenated with token IDs.
+
+Frontends, SDKs, and indexers should validate and classify known URI formats off-chain, fetch and preview metadata before minting, and warn users when metadata is unreachable or unsupported.
 
 ## Deployments
 
@@ -190,6 +200,9 @@ scarb build
 
 # Run all tests
 scarb test
+
+# Current suite size
+snforge test  # 67 tests
 
 # Run a specific test
 snforge test test_create_collection

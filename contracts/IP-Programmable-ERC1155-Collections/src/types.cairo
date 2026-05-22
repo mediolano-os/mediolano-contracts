@@ -1,5 +1,7 @@
 use starknet::ContractAddress;
 
+pub const MAX_TOKEN_URI_LEN: u32 = 2048;
+
 /// All IP provenance fields for a token, returned in a single call.
 /// Avoids multiple cross-contract calls for indexers and frontends.
 #[derive(Drop, Serde)]

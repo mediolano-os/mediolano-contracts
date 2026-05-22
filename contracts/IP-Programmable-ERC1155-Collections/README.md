@@ -13,6 +13,8 @@ Two contracts make up the system:
 | `IPCollectionFactory` | Permissionless factory — anyone calls it to deploy a new `IPCollection` |
 | `IPCollection` | Standalone ERC-1155 collection — owner controls minting, provenance and royalties |
 
+Security invariants are deliberately small: constructor inputs are validated, minting is collection-owner gated, token metadata pointers are immutable and capped at 2048 bytes, and creator/timestamp provenance is written once and never rewritten.
+
 ## Architecture
 
 ```
@@ -49,11 +51,21 @@ The factory uses a Poseidon-hashed salt `(caller, nonce)` to guarantee each depl
 | `ERC2981_default_royalty_info` | `RoyaltyInfo` | Collection-wide royalty (receiver + fraction) |
 | `ERC2981_token_royalty_info` | `Map<u256, RoyaltyInfo>` | Per-token royalty overrides |
 
+### Version
+
+Both `IPCollection` and `IPCollectionFactory` expose:
+
+```cairo
+fn version() -> ByteArray
+```
+
+Current implementation version: `0.2.0`.
+
 ### Minting
 
 Only the collection owner can mint. On the **first mint** of a token ID:
-- The URI is stored permanently and must start with `ipfs://` or `ar://`.
-- The `to` address is recorded as the original IP creator.
+- The URI is stored permanently and must be non-empty and no longer than 2048 bytes.
+- The caller (collection owner) is recorded as the original IP creator.
 - The block timestamp is recorded as the registration date.
 
 On **subsequent mints** of the same token ID the URI argument is ignored and all provenance fields remain unchanged. Balances accumulate normally.
@@ -87,6 +99,7 @@ Fee denominator: 10,000
 // IIPCollection
 fn mint_item(to, token_id, value, token_uri)
 fn batch_mint_item(to, token_ids, values, token_uris)
+fn version() -> ByteArray
 fn get_collection_creator() -> ContractAddress
 fn get_token_creator(token_id) -> ContractAddress
 fn get_token_registered_at(token_id) -> u64
@@ -114,11 +127,14 @@ IPMinted {
 
 ```cairo
 fn collection_class_hash() -> ClassHash
+fn version() -> ByteArray
 fn update_collection_class_hash(new_class_hash)   // owner only
-fn deploy_collection(name, symbol) -> ContractAddress
+fn deploy_collection(name, symbol, base_uri) -> ContractAddress
 ```
 
 `deploy_collection` is callable by **anyone** — the caller becomes the owner of the deployed collection. The factory owner can update the class hash for future deployments without affecting existing ones.
+Factory and collection constructors reject zero owner/class-hash inputs, so deployed collections start from explicit, valid authority and implementation values.
+`update_collection_class_hash` rejects the zero class hash and emits `CollectionClassHashUpdated`.
 
 ### Events
 
@@ -128,6 +144,12 @@ CollectionDeployed {
     owner: ContractAddress               [indexed]
     name: ByteArray
     symbol: ByteArray
+    base_uri: ByteArray
+}
+
+CollectionClassHashUpdated {
+    previous_class_hash: ClassHash
+    new_class_hash: ClassHash
 }
 ```
 
@@ -142,21 +164,18 @@ struct TokenData {
 }
 ```
 
-## URI Validation
+## URI Policy
 
-URIs must begin with `ipfs://` or `ar://`. HTTP and bare CIDs are rejected at the contract level. Frontends must normalize bare IPFS CIDs before calling `mint_item`:
+Token URIs are immutable once a token type is first minted. The contract intentionally validates only that the URI is non-empty and no longer than 2048 bytes, so future content-addressing systems and metadata protocols can be used without redeploying the collection implementation.
 
-```ts
-const tokenUri = rawUri.startsWith("ipfs://") || rawUri.startsWith("ar://")
-  ? rawUri
-  : `ipfs://${rawUri}`;
-```
+Frontends, SDKs, and indexers should validate and classify known URI formats off-chain, fetch and preview metadata before minting, and warn users when metadata is unreachable or unsupported.
 
 ## Design Decisions
 
 - **No upgradeability on `IPCollection`** — collections are permanent, immutable contracts. Provenance records can never be altered.
+- **Protocol-neutral token URIs** — the contract requires a non-empty metadata pointer capped at 2048 bytes but does not hard-code storage schemes such as IPFS or Arweave.
 - **ERC-2981 defaults to 0%** — no royalty is taken unless the owner explicitly sets one. Any ERC-2981-aware marketplace will read this automatically without platform-specific configuration.
-- **`to` is the creator, not the caller** — the address tokens are minted *to* is recorded as the IP creator, reflecting the actual rights holder.
+- **Caller is the creator** — the collection owner who mints the first supply of a token type is recorded as the immutable IP creator. The `to` address only receives the minted balance.
 - **`ERC1155Impl` + `ERC1155CamelImpl`, not `ERC1155MixinImpl`** — the Mixin's `uri()` returns a base URI. Embedding the two impls separately allows a custom `IERC1155MetadataURI` implementation that returns per-token URIs from storage.
 
 ## Development
@@ -167,11 +186,11 @@ cd contracts/IP-Programmable-ERC1155-Collections
 # Build
 scarb build
 
-# Run all 48 tests
+# Run all 71 tests
 scarb test
 
 # Run a specific test
-snforge test test_mint_item_ipfs_uri
+snforge test test_mint_item_http_uri_allowed
 ```
 
 ## Dependencies
@@ -180,4 +199,4 @@ snforge test test_mint_item_ipfs_uri
 |---|---|
 | `starknet` | `2.12.0` |
 | `openzeppelin` | `v0.20.0` |
-| `snforge_std` | `0.58.0` |
+| `snforge_std` | `0.59.0` |

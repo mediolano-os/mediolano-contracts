@@ -130,6 +130,7 @@ pub mod IPCollection {
 
     #[constructor]
     fn constructor(ref self: ContractState, ip_nft_class_hash: ClassHash) {
+        assert(ip_nft_class_hash.into() != 0_felt252, 'Class hash is zero');
         self.ip_nft_class_hash.write(ip_nft_class_hash);
     }
 
@@ -196,7 +197,8 @@ pub mod IPCollection {
 
             let collection = self.collections.read(collection_id);
             assert(!collection.ip_nft.is_zero(), 'Invalid collection');
-            assert(get_caller_address() == collection.owner, 'Only collection owner can mint');
+            let operator = get_caller_address();
+            assert(operator == collection.owner, 'Only collection owner can mint');
 
             let mut collection_stats = self.collection_stats.read(collection_id);
 
@@ -204,7 +206,7 @@ pub mod IPCollection {
             let next_token_id = collection_stats.total_minted + 1;
 
             let ip_nft = IIPNftDispatcher { contract_address: collection.ip_nft };
-            ip_nft.mint(recipient, next_token_id, token_uri.clone());
+            ip_nft.mint(recipient, next_token_id, token_uri.clone(), operator);
 
             collection_stats.total_minted = next_token_id;
             collection_stats.last_mint_time = get_block_timestamp();
@@ -257,7 +259,7 @@ pub mod IPCollection {
 
                 // R-05: token IDs start at 1
                 let next_token_id = collection_stats.total_minted + i.into() + 1;
-                ip_nft.mint(recipient, next_token_id, token_uri);
+                ip_nft.mint(recipient, next_token_id, token_uri, operator);
                 token_ids.append(next_token_id);
                 i += 1;
             };
@@ -646,7 +648,7 @@ pub mod IPCollection {
             self: @ContractState, collection_id: u256, owner: ContractAddress,
         ) -> bool {
             let collection = self.collections.read(collection_id);
-            collection.owner == owner
+            !collection.ip_nft.is_zero() && collection.owner == owner
         }
     }
 }

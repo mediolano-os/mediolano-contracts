@@ -86,9 +86,9 @@ pub struct TokenData {
     pub token_id: u256,
     /// Current owner of the token.
     pub owner: ContractAddress,
-    /// URI pointing to the token's metadata (must be ipfs:// or ar://).
+    /// URI pointing to the token's immutable metadata.
     pub metadata_uri: ByteArray,
-    /// Original creator — immutable Berne Convention authorship record.
+    /// Original creator/author — immutable Berne Convention authorship record.
     pub original_creator: ContractAddress,
     /// Block timestamp at mint — immutable proof of creation date.
     pub registered_at: u64,
@@ -129,22 +129,6 @@ fn bytearray_to_u256(bytes: ByteArray) -> u256 {
         result = result * 10_u256 + digit.into();
     };
     result
-}
-
-/// Returns true if `haystack` starts with `needle`, compared byte-by-byte.
-pub fn bytearray_starts_with(haystack: @ByteArray, needle: @ByteArray) -> bool {
-    let n = needle.len();
-    if haystack.len() < n {
-        return false;
-    }
-    let mut i: u32 = 0;
-    while i < n {
-        if haystack.at(i).unwrap() != needle.at(i).unwrap() {
-            return false;
-        }
-        i += 1;
-    };
-    true
 }
 
 #[cfg(test)]
@@ -224,33 +208,5 @@ mod tests {
     fn test_from_bytes_trailing_colon_panics() {
         let data: ByteArray = "123:";
         TokenTrait::from_bytes(data);
-    }
-
-    #[test]
-    fn test_bytearray_starts_with_ipfs() {
-        let uri: ByteArray = "ipfs://QmFoo";
-        let prefix: ByteArray = "ipfs://";
-        assert(bytearray_starts_with(@uri, @prefix), 'should match ipfs prefix');
-    }
-
-    #[test]
-    fn test_bytearray_starts_with_ar() {
-        let uri: ByteArray = "ar://txid123";
-        let prefix: ByteArray = "ar://";
-        assert(bytearray_starts_with(@uri, @prefix), 'should match ar prefix');
-    }
-
-    #[test]
-    fn test_bytearray_starts_with_http_fails() {
-        let uri: ByteArray = "https://example.com";
-        let prefix: ByteArray = "ipfs://";
-        assert(!bytearray_starts_with(@uri, @prefix), 'should not match ipfs');
-    }
-
-    #[test]
-    fn test_bytearray_starts_with_shorter_than_needle() {
-        let uri: ByteArray = "ip";
-        let prefix: ByteArray = "ipfs://";
-        assert(!bytearray_starts_with(@uri, @prefix), 'shorter should not match');
     }
 }

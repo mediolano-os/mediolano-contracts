@@ -1,496 +1,320 @@
-use ip_id::IPIdentity::{IIPIdentityDispatcher, IIPIdentityDispatcherTrait,};
-use snforge_std::{
-    declare, ContractClassTrait, DeclareResultTrait, cheat_caller_address,
-    start_cheat_block_timestamp, stop_cheat_block_timestamp, CheatSpan,
-};
-use starknet::{ContractAddress, contract_address_const};
 use core::serde::Serde;
+use core::traits::TryInto;
+use ip_id::IPIdentity::{IIPIdentityDispatcher, IIPIdentityDispatcherTrait};
+use snforge_std::{
+    CheatSpan, ContractClassTrait, DeclareResultTrait, cheat_caller_address, declare,
+    start_cheat_block_timestamp, stop_cheat_block_timestamp,
+};
+use starknet::ContractAddress;
 
-// Helper functions to get test addresses
-fn owner() -> ContractAddress {
-    contract_address_const::<'owner'>()
+fn creator() -> ContractAddress {
+    'creator'.try_into().unwrap()
 }
 
-fn non_owner() -> ContractAddress {
-    contract_address_const::<'non_owner'>()
+fn collaborator() -> ContractAddress {
+    'collaborator'.try_into().unwrap()
 }
 
-fn user() -> ContractAddress {
-    contract_address_const::<'user'>()
+fn new_controller() -> ContractAddress {
+    'new_controller'.try_into().unwrap()
 }
 
-// Helper function to deploy the contract
-fn deploy_ip_identity() -> (IIPIdentityDispatcher, ContractAddress) {
-    // Declare IPIdentity contract
+fn zero_address() -> ContractAddress {
+    0.try_into().unwrap()
+}
+
+fn asset_locator() -> felt252 {
+    0x123
+}
+
+fn deploy_ip_identity() -> IIPIdentityDispatcher {
     let contract_class = declare("IPIdentity").unwrap().contract_class();
-
-    // Prepare constructor calldata
-    let owner_addr = owner();
-    let name: ByteArray = "IPIdentity";
-    let symbol: ByteArray = "IPID";
-    let base_uri: ByteArray = "https://ipfs.io/ipfs/";
-
-    let mut calldata = array![];
-    owner_addr.serialize(ref calldata);
-    name.serialize(ref calldata);
-    symbol.serialize(ref calldata);
-    base_uri.serialize(ref calldata);
-
-    // Deploy contract
+    let calldata = array![];
     let (contract_address, _) = contract_class.deploy(@calldata).unwrap();
-    let ip_identity = IIPIdentityDispatcher { contract_address };
-
-    (ip_identity, owner_addr)
+    IIPIdentityDispatcher { contract_address }
 }
 
 #[test]
-#[should_panic(expected: ('IP ID already registered',))]
-fn test_register_ip_id_already_registered() {
-    let (ip_identity, _) = deploy_ip_identity();
-    let caller = user();
-    let ip_id = 123;
-    let metadata_uri: ByteArray = "ipfs://metadata";
-    let ip_type: ByteArray = "image";
-    let license_terms: ByteArray = "MIT";
+fn test_register_work_creates_immutable_anchor() {
+    let ip_identity = deploy_ip_identity();
 
-    // Register IP ID first time
-    cheat_caller_address(ip_identity.contract_address, caller, CheatSpan::TargetCalls(1));
-    ip_identity.register_ip_id(
-        ip_id,
-        metadata_uri.clone(),
-        ip_type.clone(),
-        license_terms.clone(),
-        1, // collection_id
-        250, // royalty_rate (2.5%)
-        1000, // licensing_fee
-        true, // commercial_use
-        true, // derivative_works
-        true, // attribution_required
-        "ERC721", // metadata_standard
-        "https://example.com", // external_url
-        "art,digital", // tags
-        "US" // jurisdiction
-    );
-
-    // Attempt to register same IP ID again
-    cheat_caller_address(ip_identity.contract_address, caller, CheatSpan::TargetCalls(1));
-    ip_identity.register_ip_id(
-        ip_id,
-        metadata_uri,
-        ip_type,
-        license_terms,
-        1, // collection_id
-        250, // royalty_rate
-        1000, // licensing_fee
-        true, // commercial_use
-        true, // derivative_works
-        true, // attribution_required
-        "ERC721", // metadata_standard
-        "https://example.com", // external_url
-        "art,digital", // tags
-        "US" // jurisdiction
-    );
-}
-
-#[test]
-fn test_update_ip_id_metadata_success() {
-    let (ip_identity, _) = deploy_ip_identity();
-    let caller = user();
-    let ip_id = 123;
-    let metadata_uri: ByteArray = "ipfs://metadata";
-    let new_metadata_uri: ByteArray = "ipfs://new_metadata";
-    let ip_type: ByteArray = "image";
-    let license_terms: ByteArray = "MIT";
-
-    // Register IP ID
-    cheat_caller_address(ip_identity.contract_address, caller, CheatSpan::TargetCalls(1));
-    ip_identity.register_ip_id(
-        ip_id,
-        metadata_uri,
-        ip_type,
-        license_terms,
-        1, // collection_id
-        250, // royalty_rate
-        1000, // licensing_fee
-        true, // commercial_use
-        true, // derivative_works
-        true, // attribution_required
-        "ERC721", // metadata_standard
-        "https://example.com", // external_url
-        "art,digital", // tags
-        "US" // jurisdiction
-    );
-
-    // Update metadata
-    cheat_caller_address(ip_identity.contract_address, caller, CheatSpan::TargetCalls(1));
-    start_cheat_block_timestamp(ip_identity.contract_address, 2000);
-    ip_identity.update_ip_id_metadata(ip_id, new_metadata_uri.clone());
+    cheat_caller_address(ip_identity.contract_address, creator(), CheatSpan::TargetCalls(1));
+    start_cheat_block_timestamp(ip_identity.contract_address, 1000);
+    let ip_id = ip_identity.register_work("ipfs://work-metadata", 'metadata_hash', 0, 0);
     stop_cheat_block_timestamp(ip_identity.contract_address);
 
-    // Verify updated data
-    let ip_data = ip_identity.get_ip_id_data(ip_id);
-    assert(ip_data.metadata_uri == new_metadata_uri, 'Invalid new metadata URI');
-    assert(ip_data.updated_at == 2000, 'Invalid updated_at');
+    let work = ip_identity.get_work(ip_id);
+    assert(ip_id == 1, 'wrong ip id');
+    assert(work.creator == creator(), 'wrong creator');
+    assert(work.controller == creator(), 'wrong controller');
+    assert(work.metadata_uri == "ipfs://work-metadata", 'wrong uri');
+    assert(work.metadata_hash == 'metadata_hash', 'wrong hash');
+    assert(work.parent_ip_id == 0, 'wrong parent');
+    assert(work.parent_relation == 0, 'wrong relation');
+    assert(work.created_at == 1000, 'wrong timestamp');
+    assert(work.representation_count == 0, 'wrong representations');
+    assert(work.attestation_count == 0, 'wrong attestations');
+    assert(ip_identity.get_total_works() == 1, 'wrong total');
 }
 
 #[test]
-#[should_panic(expected: ('Caller is not the owner',))]
-fn test_update_ip_id_metadata_not_owner() {
-    let (ip_identity, _) = deploy_ip_identity();
-    let owner = user();
-    let non_owner_addr = non_owner();
-    let ip_id = 123;
-    let metadata_uri: ByteArray = "ipfs://metadata";
-    let new_metadata_uri: ByteArray = "ipfs://new_metadata";
-    let ip_type: ByteArray = "image";
-    let license_terms: ByteArray = "MIT";
+fn test_register_child_work_requires_existing_parent() {
+    let ip_identity = deploy_ip_identity();
 
-    // Register IP ID
-    cheat_caller_address(ip_identity.contract_address, owner, CheatSpan::TargetCalls(1));
-    ip_identity.register_ip_id(
-        ip_id,
-        metadata_uri,
-        ip_type,
-        license_terms,
-        1, // collection_id
-        250, // royalty_rate
-        1000, // licensing_fee
-        true, // commercial_use
-        true, // derivative_works
-        true, // attribution_required
-        "ERC721", // metadata_standard
-        "https://example.com", // external_url
-        "art,digital", // tags
-        "US" // jurisdiction
-    );
+    cheat_caller_address(ip_identity.contract_address, creator(), CheatSpan::TargetCalls(1));
+    let parent_ip_id = ip_identity.register_work("ipfs://parent", 'parent_hash', 0, 0);
 
-    // Attempt to update metadata as non-owner
-    cheat_caller_address(ip_identity.contract_address, non_owner_addr, CheatSpan::TargetCalls(1));
-    ip_identity.update_ip_id_metadata(ip_id, new_metadata_uri);
+    cheat_caller_address(ip_identity.contract_address, collaborator(), CheatSpan::TargetCalls(1));
+    let child_ip_id = ip_identity
+        .register_work("ipfs://child", 'child_hash', parent_ip_id, 'DERIVATIVE');
+
+    let child = ip_identity.get_work(child_ip_id);
+    assert(child.parent_ip_id == parent_ip_id, 'wrong parent link');
+    assert(child.parent_relation == 'DERIVATIVE', 'wrong parent relation');
+    assert(child.creator == collaborator(), 'wrong child creator');
 }
 
 #[test]
-#[should_panic(expected: ('Invalid IP ID',))]
-fn test_update_ip_id_metadata_invalid_id() {
-    let (ip_identity, _) = deploy_ip_identity();
-    let caller = user();
-    let ip_id = 123;
-    let new_metadata_uri: ByteArray = "ipfs://new_metadata";
+#[should_panic(expected: ('IPID: invalid parent',))]
+fn test_register_child_work_rejects_missing_parent() {
+    let ip_identity = deploy_ip_identity();
 
-    // Attempt to update metadata for non-existent IP ID
-    cheat_caller_address(ip_identity.contract_address, caller, CheatSpan::TargetCalls(1));
-    ip_identity.update_ip_id_metadata(ip_id, new_metadata_uri);
+    cheat_caller_address(ip_identity.contract_address, creator(), CheatSpan::TargetCalls(1));
+    ip_identity.register_work("ipfs://child", 'child_hash', 999, 'DERIVATIVE');
 }
 
 #[test]
-fn test_verify_ip_id_success() {
-    let (ip_identity, owner_addr) = deploy_ip_identity();
-    let user_addr = user();
-    let ip_id = 123;
-    let metadata_uri: ByteArray = "ipfs://metadata";
-    let ip_type: ByteArray = "image";
-    let license_terms: ByteArray = "MIT";
+#[should_panic(expected: ('IPID: invalid parent',))]
+fn test_child_work_requires_parent_relation() {
+    let ip_identity = deploy_ip_identity();
 
-    // Register IP ID
-    cheat_caller_address(ip_identity.contract_address, user_addr, CheatSpan::TargetCalls(1));
-    ip_identity.register_ip_id(
-        ip_id,
-        metadata_uri,
-        ip_type,
-        license_terms,
-        1, // collection_id
-        250, // royalty_rate
-        1000, // licensing_fee
-        true, // commercial_use
-        true, // derivative_works
-        true, // attribution_required
-        "ERC721", // metadata_standard
-        "https://example.com", // external_url
-        "art,digital", // tags
-        "US" // jurisdiction
-    );
+    cheat_caller_address(ip_identity.contract_address, creator(), CheatSpan::TargetCalls(1));
+    let parent_ip_id = ip_identity.register_work("ipfs://parent", 'parent_hash', 0, 0);
 
-    // Verify IP ID
-    cheat_caller_address(ip_identity.contract_address, owner_addr, CheatSpan::TargetCalls(1));
+    cheat_caller_address(ip_identity.contract_address, collaborator(), CheatSpan::TargetCalls(1));
+    ip_identity.register_work("ipfs://child", 'child_hash', parent_ip_id, 0);
+}
+
+#[test]
+#[should_panic(expected: ('IPID: invalid metadata',))]
+fn test_register_work_requires_metadata_hash() {
+    let ip_identity = deploy_ip_identity();
+
+    cheat_caller_address(ip_identity.contract_address, creator(), CheatSpan::TargetCalls(1));
+    ip_identity.register_work("ipfs://work", 0, 0, 0);
+}
+
+#[test]
+fn test_controller_links_multiple_representations() {
+    let ip_identity = deploy_ip_identity();
+
+    cheat_caller_address(ip_identity.contract_address, creator(), CheatSpan::TargetCalls(1));
+    let ip_id = ip_identity.register_work("ipfs://work", 'work_hash', 0, 0);
+    let starknet_key = ip_identity
+        .derive_representation_key('starknet', asset_locator(), 7, 0, 'ERC721');
+    let ethereum_key = ip_identity
+        .derive_representation_key('ethereum', 0x456, 42, 'external_locator_hash', 'ERC1155');
+
+    cheat_caller_address(ip_identity.contract_address, creator(), CheatSpan::TargetCalls(1));
     start_cheat_block_timestamp(ip_identity.contract_address, 2000);
-    ip_identity.verify_ip_id(ip_id);
+    ip_identity
+        .link_representation(
+            ip_id,
+            'starknet',
+            asset_locator(),
+            7,
+            0,
+            "ipfs://starknet-token",
+            'starknet_metadata_hash',
+            'ERC721',
+        );
     stop_cheat_block_timestamp(ip_identity.contract_address);
 
-    // Verify updated data
-    let ip_data = ip_identity.get_ip_id_data(ip_id);
-    assert(ip_data.is_verified, 'Should be verified');
-    assert(ip_data.updated_at == 2000, 'Invalid updated_at');
+    cheat_caller_address(ip_identity.contract_address, creator(), CheatSpan::TargetCalls(1));
+    ip_identity
+        .link_representation(
+            ip_id,
+            'ethereum',
+            0x456,
+            42,
+            'external_locator_hash',
+            "ipfs://ethereum-token",
+            'ethereum_metadata_hash',
+            'ERC1155',
+        );
+
+    let work = ip_identity.get_work(ip_id);
+    let representation = ip_identity.get_representation(starknet_key);
+    assert(work.representation_count == 2, 'wrong representation count');
+    assert(ip_identity.get_representation_ip_id(starknet_key) == ip_id, 'wrong reverse link');
+    assert(ip_identity.get_work_representation_key(ip_id, 0) == starknet_key, 'wrong first key');
+    assert(ip_identity.get_work_representation_key(ip_id, 1) == ethereum_key, 'wrong second key');
+    assert(representation.representation_key == starknet_key, 'wrong stored key');
+    assert(representation.chain_id == 'starknet', 'wrong chain');
+    assert(representation.asset_locator == asset_locator(), 'wrong locator');
+    assert(representation.token_id == 7, 'wrong token');
+    assert(representation.metadata_hash == 'starknet_metadata_hash', 'wrong metadata hash');
+    assert(representation.linked_at == 2000, 'wrong linked timestamp');
 }
 
 #[test]
-#[should_panic(expected: ('Caller is not the owner',))]
-fn test_verify_ip_id_not_owner() {
-    let (ip_identity, _) = deploy_ip_identity();
-    let caller = user();
-    let ip_id = 123;
-    let metadata_uri: ByteArray = "ipfs://metadata";
-    let ip_type: ByteArray = "image";
-    let license_terms: ByteArray = "MIT";
+#[should_panic(expected: ('IPID: invalid representation',))]
+fn test_representation_requires_chain_namespace() {
+    let ip_identity = deploy_ip_identity();
 
-    // Register IP ID
-    cheat_caller_address(ip_identity.contract_address, caller, CheatSpan::TargetCalls(1));
-    ip_identity.register_ip_id(
-        ip_id,
-        metadata_uri,
-        ip_type,
-        license_terms,
-        1, // collection_id
-        250, // royalty_rate
-        1000, // licensing_fee
-        true, // commercial_use
-        true, // derivative_works
-        true, // attribution_required
-        "ERC721", // metadata_standard
-        "https://example.com", // external_url
-        "art,digital", // tags
-        "US" // jurisdiction
-    );
+    cheat_caller_address(ip_identity.contract_address, creator(), CheatSpan::TargetCalls(1));
+    let ip_id = ip_identity.register_work("ipfs://work", 'work_hash', 0, 0);
 
-    // Attempt to verify as non-owner
-    cheat_caller_address(ip_identity.contract_address, caller, CheatSpan::TargetCalls(1));
-    ip_identity.verify_ip_id(ip_id);
+    cheat_caller_address(ip_identity.contract_address, creator(), CheatSpan::TargetCalls(1));
+    ip_identity
+        .link_representation(
+            ip_id,
+            0,
+            asset_locator(),
+            7,
+            0,
+            "ipfs://starknet-token",
+            'starknet_metadata_hash',
+            'ERC721',
+        );
 }
 
 #[test]
-#[should_panic(expected: ('Invalid IP ID',))]
-fn test_verify_ip_id_invalid_id() {
-    let (ip_identity, owner_addr) = deploy_ip_identity();
-    let ip_id = 123;
+#[should_panic(expected: ('IPID: not controller',))]
+fn test_only_controller_can_link_representation() {
+    let ip_identity = deploy_ip_identity();
 
-    // Attempt to verify non-existent IP ID
-    cheat_caller_address(ip_identity.contract_address, owner_addr, CheatSpan::TargetCalls(1));
-    ip_identity.verify_ip_id(ip_id);
+    cheat_caller_address(ip_identity.contract_address, creator(), CheatSpan::TargetCalls(1));
+    let ip_id = ip_identity.register_work("ipfs://work", 'work_hash', 0, 0);
+
+    cheat_caller_address(ip_identity.contract_address, collaborator(), CheatSpan::TargetCalls(1));
+    ip_identity
+        .link_representation(
+            ip_id,
+            'starknet',
+            asset_locator(),
+            7,
+            0,
+            "ipfs://starknet-token",
+            'starknet_metadata_hash',
+            'ERC721',
+        );
 }
 
 #[test]
-#[should_panic(expected: ('Invalid IP ID',))]
-fn test_get_ip_id_data_invalid_id() {
-    let (ip_identity, _) = deploy_ip_identity();
-    let ip_id = 999;
+#[should_panic(expected: ('IPID: representation linked',))]
+fn test_representation_key_is_globally_unique() {
+    let ip_identity = deploy_ip_identity();
 
-    // Attempt to get data for non-existent IP ID
-    ip_identity.get_ip_id_data(ip_id);
-}
+    cheat_caller_address(ip_identity.contract_address, creator(), CheatSpan::TargetCalls(1));
+    let first_ip_id = ip_identity.register_work("ipfs://work-1", 'work_hash_1', 0, 0);
 
-// Enhanced functionality tests
+    cheat_caller_address(ip_identity.contract_address, collaborator(), CheatSpan::TargetCalls(1));
+    let second_ip_id = ip_identity.register_work("ipfs://work-2", 'work_hash_2', 0, 0);
 
-#[test]
-fn test_enhanced_ip_registration() {
-    let (ip_identity, _) = deploy_ip_identity();
-    let caller = user();
-    let ip_id = 123;
-    let metadata_uri: ByteArray = "ipfs://metadata";
-    let ip_type: ByteArray = "image";
-    let license_terms: ByteArray = "MIT";
+    cheat_caller_address(ip_identity.contract_address, creator(), CheatSpan::TargetCalls(1));
+    ip_identity
+        .link_representation(
+            first_ip_id,
+            'starknet',
+            asset_locator(),
+            1,
+            0,
+            "ipfs://token-1",
+            'metadata_hash_1',
+            'ERC721',
+        );
 
-    cheat_caller_address(ip_identity.contract_address, caller, CheatSpan::TargetCalls(1));
-    let token_id = ip_identity.register_ip_id(
-        ip_id,
-        metadata_uri.clone(),
-        ip_type.clone(),
-        license_terms.clone(),
-        1, // collection_id
-        250, // royalty_rate (2.5%)
-        1000, // licensing_fee
-        true, // commercial_use
-        true, // derivative_works
-        true, // attribution_required
-        "ERC721", // metadata_standard
-        "https://example.com", // external_url
-        "art,digital", // tags
-        "US" // jurisdiction
-    );
-
-    // Verify enhanced data
-    let ip_data = ip_identity.get_ip_id_data(ip_id);
-    assert(ip_data.collection_id == 1, 'Invalid collection_id');
-    assert(ip_data.royalty_rate == 250, 'Invalid royalty_rate');
-    assert(ip_data.licensing_fee == 1000, 'Invalid licensing_fee');
-    assert(ip_data.commercial_use == true, 'Invalid commercial_use');
-    assert(ip_data.derivative_works == true, 'Invalid derivative_works');
-    assert(ip_data.attribution_required == true, 'Invalid attribution_required');
-    assert(ip_data.metadata_standard == "ERC721", 'Invalid metadata_standard');
-    assert(ip_data.external_url == "https://example.com", 'Invalid external_url');
-    assert(ip_data.tags == "art,digital", 'Invalid tags');
-    assert(ip_data.jurisdiction == "US", 'Invalid jurisdiction');
-
-    // Test utility functions
-    assert(ip_identity.is_ip_id_registered(ip_id), 'IP should be registered');
-    assert(ip_identity.can_use_commercially(ip_id), 'Should allow commercial use');
-    assert(ip_identity.can_create_derivatives(ip_id), 'Should allow derivatives');
-    assert(ip_identity.requires_attribution(ip_id), 'Should require attribution');
-    assert(ip_identity.get_total_registered_ips() == 1, 'Total should be 1');
+    cheat_caller_address(ip_identity.contract_address, collaborator(), CheatSpan::TargetCalls(1));
+    ip_identity
+        .link_representation(
+            second_ip_id,
+            'starknet',
+            asset_locator(),
+            1,
+            0,
+            "ipfs://token-1",
+            'metadata_hash_1',
+            'ERC721',
+        );
 }
 
 #[test]
-fn test_licensing_update() {
-    let (ip_identity, _) = deploy_ip_identity();
-    let caller = user();
-    let ip_id = 123;
-    let metadata_uri: ByteArray = "ipfs://metadata";
-    let ip_type: ByteArray = "image";
-    let license_terms: ByteArray = "MIT";
+fn test_controller_can_be_transferred() {
+    let ip_identity = deploy_ip_identity();
 
-    // Register IP ID
-    cheat_caller_address(ip_identity.contract_address, caller, CheatSpan::TargetCalls(1));
-    ip_identity.register_ip_id(
-        ip_id,
-        metadata_uri,
-        ip_type,
-        license_terms,
-        1, // collection_id
-        250, // royalty_rate
-        1000, // licensing_fee
-        true, // commercial_use
-        true, // derivative_works
-        true, // attribution_required
-        "ERC721", // metadata_standard
-        "https://example.com", // external_url
-        "art,digital", // tags
-        "US" // jurisdiction
-    );
+    cheat_caller_address(ip_identity.contract_address, creator(), CheatSpan::TargetCalls(1));
+    let ip_id = ip_identity.register_work("ipfs://work", 'work_hash', 0, 0);
 
-    // Update licensing
-    let new_license_terms: ByteArray = "Apache 2.0";
-    cheat_caller_address(ip_identity.contract_address, caller, CheatSpan::TargetCalls(1));
-    ip_identity.update_ip_id_licensing(
-        ip_id,
-        new_license_terms.clone(),
-        500, // new royalty_rate (5%)
-        2000, // new licensing_fee
-        false, // commercial_use
-        false, // derivative_works
-        false, // attribution_required
-    );
+    cheat_caller_address(ip_identity.contract_address, creator(), CheatSpan::TargetCalls(1));
+    ip_identity.transfer_controller(ip_id, new_controller());
 
-    // Verify updated licensing
-    let (license, royalty, fee, commercial, derivatives, attribution) = ip_identity.get_ip_licensing_terms(ip_id);
-    assert(license == new_license_terms, 'License not updated');
-    assert(royalty == 500, 'Royalty not updated');
-    assert(fee == 2000, 'Fee not updated');
-    assert(commercial == false, 'Commercial use not updated');
-    assert(derivatives == false, 'Derivatives not updated');
-    assert(attribution == false, 'Attribution not updated');
+    let work = ip_identity.get_work(ip_id);
+    assert(work.creator == creator(), 'creator should not change');
+    assert(work.controller == new_controller(), 'controller did not transfer');
+
+    cheat_caller_address(ip_identity.contract_address, new_controller(), CheatSpan::TargetCalls(1));
+    ip_identity
+        .link_representation(
+            ip_id,
+            'bitcoin',
+            0,
+            0,
+            'inscription_hash',
+            "ipfs://ordinal-proof",
+            'ordinal_metadata_hash',
+            'ORDINAL',
+        );
+
+    let ordinal_key = ip_identity
+        .derive_representation_key('bitcoin', 0, 0, 'inscription_hash', 'ORDINAL');
+    assert(ip_identity.is_representation_linked(ordinal_key), 'representation not linked');
 }
 
 #[test]
-fn test_ownership_transfer() {
-    let (ip_identity, _) = deploy_ip_identity();
-    let original_owner = user();
-    let new_owner = non_owner();
-    let ip_id = 123;
-    let metadata_uri: ByteArray = "ipfs://metadata";
-    let ip_type: ByteArray = "image";
-    let license_terms: ByteArray = "MIT";
+#[should_panic(expected: ('IPID: invalid controller',))]
+fn test_controller_transfer_rejects_zero_address() {
+    let ip_identity = deploy_ip_identity();
 
-    // Register IP ID
-    cheat_caller_address(ip_identity.contract_address, original_owner, CheatSpan::TargetCalls(1));
-    ip_identity.register_ip_id(
-        ip_id,
-        metadata_uri,
-        ip_type,
-        license_terms,
-        1, // collection_id
-        250, // royalty_rate
-        1000, // licensing_fee
-        true, // commercial_use
-        true, // derivative_works
-        true, // attribution_required
-        "ERC721", // metadata_standard
-        "https://example.com", // external_url
-        "art,digital", // tags
-        "US" // jurisdiction
-    );
+    cheat_caller_address(ip_identity.contract_address, creator(), CheatSpan::TargetCalls(1));
+    let ip_id = ip_identity.register_work("ipfs://work", 'work_hash', 0, 0);
 
-    // Verify original owner
-    assert(ip_identity.get_ip_owner(ip_id) == original_owner, 'Wrong original owner');
-
-    // Transfer ownership
-    cheat_caller_address(ip_identity.contract_address, original_owner, CheatSpan::TargetCalls(1));
-    ip_identity.transfer_ip_ownership(ip_id, new_owner);
-
-    // Verify new owner
-    assert(ip_identity.get_ip_owner(ip_id) == new_owner, 'Transfer failed');
+    cheat_caller_address(ip_identity.contract_address, creator(), CheatSpan::TargetCalls(1));
+    ip_identity.transfer_controller(ip_id, zero_address());
 }
 
 #[test]
-fn test_batch_queries() {
-    let (ip_identity, _) = deploy_ip_identity();
-    let owner1 = user();
-    let owner2 = non_owner();
+fn test_anyone_can_add_append_only_attestation() {
+    let ip_identity = deploy_ip_identity();
 
-    // Register multiple IP IDs
-    cheat_caller_address(ip_identity.contract_address, owner1, CheatSpan::TargetCalls(2));
-    ip_identity.register_ip_id(
-        123, "ipfs://metadata1", "image", "MIT", 1, 250, 1000,
-        true, true, true, "ERC721", "https://example1.com", "art", "US"
-    );
-    ip_identity.register_ip_id(
-        124, "ipfs://metadata2", "video", "Apache", 1, 300, 1500,
-        false, true, false, "ERC721", "https://example2.com", "video", "EU"
-    );
+    cheat_caller_address(ip_identity.contract_address, creator(), CheatSpan::TargetCalls(1));
+    let ip_id = ip_identity.register_work("ipfs://work", 'work_hash', 0, 0);
 
-    cheat_caller_address(ip_identity.contract_address, owner2, CheatSpan::TargetCalls(1));
-    ip_identity.register_ip_id(
-        125, "ipfs://metadata3", "image", "GPL", 2, 400, 2000,
-        true, false, true, "ERC1155", "https://example3.com", "art,nft", "UK"
-    );
+    cheat_caller_address(ip_identity.contract_address, collaborator(), CheatSpan::TargetCalls(1));
+    start_cheat_block_timestamp(ip_identity.contract_address, 3000);
+    let attestation_id = ip_identity
+        .attest(ip_id, 'PROVENANCE', 'provenance_hash', "ipfs://provenance-proof");
+    stop_cheat_block_timestamp(ip_identity.contract_address);
 
-    // Test owner queries
-    let owner1_ips = ip_identity.get_owner_ip_ids(owner1);
-    assert(owner1_ips.len() == 2, 'Owner1 should have 2 IPs');
-
-    let owner2_ips = ip_identity.get_owner_ip_ids(owner2);
-    assert(owner2_ips.len() == 1, 'Owner2 should have 1 IP');
-
-    // Test collection queries
-    let collection1_ips = ip_identity.get_ip_ids_by_collection(1);
-    assert(collection1_ips.len() == 2, 'Collection 1 should have 2 IPs');
-
-    let collection2_ips = ip_identity.get_ip_ids_by_collection(2);
-    assert(collection2_ips.len() == 1, 'Collection 2 should have 1 IP');
-
-    // Test type queries
-    let image_ips = ip_identity.get_ip_ids_by_type("image");
-    assert(image_ips.len() == 2, 'Should have 2 image IPs');
-
-    let video_ips = ip_identity.get_ip_ids_by_type("video");
-    assert(video_ips.len() == 1, 'Should have 1 video IP');
-
-    // Test total count
-    assert(ip_identity.get_total_registered_ips() == 3, 'Total should be 3');
+    let work = ip_identity.get_work(ip_id);
+    let attestation = ip_identity.get_attestation(ip_id, attestation_id);
+    assert(attestation_id == 1, 'wrong attestation id');
+    assert(work.attestation_count == 1, 'wrong attestation count');
+    assert(attestation.attester == collaborator(), 'wrong attester');
+    assert(attestation.attestation_type == 'PROVENANCE', 'wrong type');
+    assert(attestation.data_hash == 'provenance_hash', 'wrong data hash');
+    assert(attestation.uri == "ipfs://provenance-proof", 'wrong uri');
+    assert(attestation.created_at == 3000, 'wrong attestation timestamp');
 }
 
 #[test]
-fn test_verification_workflow() {
-    let (ip_identity, owner_addr) = deploy_ip_identity();
-    let user_addr = user();
-    let ip_id = 123;
+#[should_panic(expected: ('IPID: invalid attestation',))]
+fn test_attestation_requires_type_and_hash() {
+    let ip_identity = deploy_ip_identity();
 
-    // Register IP ID
-    cheat_caller_address(ip_identity.contract_address, user_addr, CheatSpan::TargetCalls(1));
-    ip_identity.register_ip_id(
-        ip_id, "ipfs://metadata", "image", "MIT", 1, 250, 1000,
-        true, true, true, "ERC721", "https://example.com", "art", "US"
-    );
+    cheat_caller_address(ip_identity.contract_address, creator(), CheatSpan::TargetCalls(1));
+    let ip_id = ip_identity.register_work("ipfs://work", 'work_hash', 0, 0);
 
-    // Initially not verified
-    assert(!ip_identity.is_ip_verified(ip_id), 'Should not be verified initially');
-
-    // Verify IP ID
-    cheat_caller_address(ip_identity.contract_address, owner_addr, CheatSpan::TargetCalls(1));
-    ip_identity.verify_ip_id(ip_id);
-
-    // Now should be verified
-    assert(ip_identity.is_ip_verified(ip_id), 'Should be verified now');
-
-    // Test verified IPs query
-    let verified_ips = ip_identity.get_verified_ip_ids(10, 0);
-    assert(verified_ips.len() == 1, 'Should have 1 verified IP');
-    assert(*verified_ips.at(0) == ip_id, 'Wrong verified IP ID');
+    cheat_caller_address(ip_identity.contract_address, collaborator(), CheatSpan::TargetCalls(1));
+    ip_identity.attest(ip_id, 0, 'provenance_hash', "ipfs://provenance-proof");
 }

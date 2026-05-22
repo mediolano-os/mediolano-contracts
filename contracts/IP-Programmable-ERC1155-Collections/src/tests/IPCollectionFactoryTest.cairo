@@ -5,7 +5,7 @@ use ip_programmable_erc1155_collections::interfaces::IIPCollection::{
     IIPCollectionDispatcher, IIPCollectionDispatcherTrait,
 };
 use ip_programmable_erc1155_collections::IPCollectionFactory::IPCollectionFactory::{
-    CollectionDeployed, Event,
+    CollectionClassHashUpdated, CollectionDeployed, Event,
 };
 use openzeppelin::access::ownable::interface::{IOwnableDispatcher, IOwnableDispatcherTrait};
 use openzeppelin::token::erc1155::interface::{IERC1155Dispatcher, IERC1155DispatcherTrait};
@@ -42,6 +42,9 @@ fn COLLECTION_NAME_2() -> ByteArray {
 fn COLLECTION_SYMBOL_2() -> ByteArray {
     "SC2"
 }
+fn ZERO_CLASS_HASH() -> ClassHash {
+    0.try_into().unwrap()
+}
 
 // ─── Helpers ───────────────────────────────────────────────────────────────────
 
@@ -52,7 +55,12 @@ fn collection_class_hash() -> ClassHash {
 
 fn deploy_factory(owner: ContractAddress) -> (IIPCollectionFactoryDispatcher, ContractAddress) {
     let class_hash = collection_class_hash();
+    deploy_factory_with_class_hash(owner, class_hash)
+}
 
+fn deploy_factory_with_class_hash(
+    owner: ContractAddress, class_hash: ClassHash,
+) -> (IIPCollectionFactoryDispatcher, ContractAddress) {
     let mut calldata: Array<felt252> = array![];
     owner.serialize(ref calldata);
     class_hash.serialize(ref calldata);
@@ -87,6 +95,13 @@ fn test_factory_constructor_class_hash() {
     let owner = FACTORY_OWNER();
     let (factory, _) = deploy_factory(owner);
     assert_eq!(factory.collection_class_hash(), collection_class_hash());
+}
+
+#[test]
+fn test_factory_version() {
+    let owner = FACTORY_OWNER();
+    let (factory, _) = deploy_factory(owner);
+    assert_eq!(factory.version(), "0.2.0");
 }
 
 // ─── deploy_collection ─────────────────────────────────────────────────────────
@@ -294,6 +309,34 @@ fn test_update_class_hash_by_owner() {
 }
 
 #[test]
+fn test_update_class_hash_emits_event() {
+    let owner = FACTORY_OWNER();
+    let (factory, address) = deploy_factory(owner);
+
+    let previous_class_hash = factory.collection_class_hash();
+    let new_class_hash = collection_class_hash();
+
+    cheat_caller_address(address, owner, CheatSpan::TargetCalls(1));
+    let mut spy = spy_events();
+    factory.update_collection_class_hash(new_class_hash);
+
+    spy
+        .assert_emitted(
+            @array![
+                (
+                    address,
+                    Event::CollectionClassHashUpdated(
+                        CollectionClassHashUpdated {
+                            previous_class_hash,
+                            new_class_hash,
+                        },
+                    ),
+                ),
+            ],
+        );
+}
+
+#[test]
 #[should_panic(expected: 'Caller is not the owner')]
 fn test_update_class_hash_not_owner() {
     let owner = FACTORY_OWNER();
@@ -301,6 +344,16 @@ fn test_update_class_hash_not_owner() {
 
     cheat_caller_address(address, USER1(), CheatSpan::TargetCalls(1));
     factory.update_collection_class_hash(collection_class_hash());
+}
+
+#[test]
+#[should_panic(expected: 'Class hash is zero')]
+fn test_update_class_hash_zero_rejected() {
+    let owner = FACTORY_OWNER();
+    let (factory, address) = deploy_factory(owner);
+
+    cheat_caller_address(address, owner, CheatSpan::TargetCalls(1));
+    factory.update_collection_class_hash(ZERO_CLASS_HASH());
 }
 
 // ─── Anyone can deploy ─────────────────────────────────────────────────────────

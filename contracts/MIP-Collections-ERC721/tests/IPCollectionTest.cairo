@@ -29,12 +29,17 @@ fn ZERO() -> ContractAddress {
     0.try_into().unwrap()
 }
 
-// Valid content-addressed URIs (COMP-04)
 fn IPFS_URI() -> ByteArray {
     "ipfs://QmCollectionBaseUri"
 }
 fn AR_URI() -> ByteArray {
     "ar://txid123456"
+}
+fn HTTP_URI() -> ByteArray {
+    "https://example.com/metadata.json"
+}
+fn FUTURE_URI() -> ByteArray {
+    "hyperblob://future-content-address-123"
 }
 
 const COLLECTION_ID: u256 = 1;
@@ -142,8 +147,8 @@ fn test_mint_token() {
     assert(token.token_id == token_id, 'Token ID mismatch');
     assert(token.owner == recipient, 'Token owner mismatch');
     assert(token.metadata_uri == IPFS_URI(), 'Token metadata URI mismatch');
-    // COMP-02 + COMP-07: original creator must be populated
-    assert(token.original_creator == recipient, 'Original creator mismatch');
+    // COMP-02 + COMP-07: original creator is the minting collection owner, not recipient
+    assert(token.original_creator == owner, 'Original creator mismatch');
 }
 
 #[test]
@@ -198,13 +203,15 @@ fn test_mint_zero_caller() {
 }
 
 #[test]
-#[should_panic(expected: ('URI must be ipfs:// or ar://',))]
-fn test_mint_invalid_uri_http_rejected() {
+fn test_mint_http_uri_allowed() {
     let (dispatcher, ip_address) = deploy_contract();
     let owner = OWNER();
     let collection_id = setup_collection(dispatcher, ip_address);
     cheat_caller_address(ip_address, owner, CheatSpan::TargetCalls(1));
-    dispatcher.mint(collection_id, USER1(), "https://example.com/metadata.json");
+    let token_id = dispatcher.mint(collection_id, USER1(), HTTP_URI());
+
+    let token = dispatcher.get_token(format!("{}:{}", collection_id, token_id));
+    assert(token.metadata_uri == HTTP_URI(), 'HTTP URI mismatch');
 }
 
 #[test]
@@ -215,6 +222,28 @@ fn test_mint_valid_ar_uri() {
     cheat_caller_address(ip_address, owner, CheatSpan::TargetCalls(1));
     let token_id = dispatcher.mint(collection_id, USER1(), AR_URI());
     assert(token_id == 1, 'ar:// URI should be accepted');
+}
+
+#[test]
+fn test_mint_future_uri_scheme_allowed() {
+    let (dispatcher, ip_address) = deploy_contract();
+    let owner = OWNER();
+    let collection_id = setup_collection(dispatcher, ip_address);
+    cheat_caller_address(ip_address, owner, CheatSpan::TargetCalls(1));
+    let token_id = dispatcher.mint(collection_id, USER1(), FUTURE_URI());
+
+    let token = dispatcher.get_token(format!("{}:{}", collection_id, token_id));
+    assert(token.metadata_uri == FUTURE_URI(), 'Future URI mismatch');
+}
+
+#[test]
+#[should_panic(expected: ('Invalid URI length',))]
+fn test_mint_empty_uri_rejected() {
+    let (dispatcher, ip_address) = deploy_contract();
+    let owner = OWNER();
+    let collection_id = setup_collection(dispatcher, ip_address);
+    cheat_caller_address(ip_address, owner, CheatSpan::TargetCalls(1));
+    dispatcher.mint(collection_id, USER1(), "");
 }
 
 // ─── Batch mint ────────────────────────────────────────────────────────────────
@@ -242,8 +271,8 @@ fn test_batch_mint_tokens() {
     // R-05: first batch token ID is 1
     assert(token0.token_id == 1, 'First token ID should be 1');
     assert(token1.token_id == 2, 'Second token ID should be 2');
-    assert(token0.original_creator == recipient1, 'Creator0 mismatch');
-    assert(token1.original_creator == recipient2, 'Creator1 mismatch');
+    assert(token0.original_creator == owner, 'Creator0 mismatch');
+    assert(token1.original_creator == owner, 'Creator1 mismatch');
 }
 
 #[test]
@@ -316,7 +345,7 @@ fn test_archive_preserves_record() {
     let nft = IIPNftDispatcher { contract_address: collection_data.ip_nft };
 
     assert(nft.is_archived(token_id), 'Token should be archived');
-    assert(nft.get_token_creator(token_id) == recipient, 'Creator must be preserved');
+    assert(nft.get_token_creator(token_id) == owner, 'Creator must be preserved');
     assert(nft.get_token_registered_at(token_id) == 1700000000, 'Timestamp must be preserved');
 
     let erc721 = IERC721Dispatcher { contract_address: collection_data.ip_nft };
@@ -674,7 +703,7 @@ fn test_get_token_creator() {
     let collection_data = dispatcher.get_collection(collection_id);
     let nft = IIPNftDispatcher { contract_address: collection_data.ip_nft };
 
-    assert(nft.get_token_creator(token_id) == recipient, 'Creator should be recipient');
+    assert(nft.get_token_creator(token_id) == owner, 'Creator should be minter');
 }
 
 #[test]
@@ -713,7 +742,7 @@ fn test_token_data_includes_creator_and_timestamp() {
     let token_key = format!("{}:{}", collection_id, token_id);
     let token_data = dispatcher.get_token(token_key);
 
-    assert(token_data.original_creator == recipient, 'original_creator mismatch');
+    assert(token_data.original_creator == owner, 'original_creator mismatch');
     // registered_at may be 0 in test env without timestamp cheat — field existence is what matters
     let _ = token_data.registered_at;
 }
@@ -723,25 +752,25 @@ fn test_creator_unchanged_after_transfer() {
     // COMP-02: original_creator must not change after ownership transfer
     let (dispatcher, ip_address) = deploy_contract();
     let owner = OWNER();
-    let creator = USER1();
+    let holder = USER1();
     let buyer = USER2();
     let collection_id = setup_collection(dispatcher, ip_address);
 
     cheat_caller_address(ip_address, owner, CheatSpan::TargetCalls(1));
-    let token_id = dispatcher.mint(collection_id, creator, IPFS_URI());
+    let token_id = dispatcher.mint(collection_id, holder, IPFS_URI());
 
     let collection_data = dispatcher.get_collection(collection_id);
     let erc721 = IERC721Dispatcher { contract_address: collection_data.ip_nft };
-    cheat_caller_address(collection_data.ip_nft, creator, CheatSpan::TargetCalls(1));
+    cheat_caller_address(collection_data.ip_nft, holder, CheatSpan::TargetCalls(1));
     erc721.approve(ip_address, token_id);
 
     let token_key = format!("{}:{}", collection_id, token_id);
-    cheat_caller_address(ip_address, creator, CheatSpan::TargetCalls(1));
-    dispatcher.transfer_token(creator, buyer, token_key.clone());
+    cheat_caller_address(ip_address, holder, CheatSpan::TargetCalls(1));
+    dispatcher.transfer_token(holder, buyer, token_key.clone());
 
-    // After transfer, original_creator must still be the original recipient
+    // After transfer, original_creator must still be the minting collection owner
     let nft = IIPNftDispatcher { contract_address: collection_data.ip_nft };
-    assert(nft.get_token_creator(token_id) == creator, 'Creator changed after transfer!');
+    assert(nft.get_token_creator(token_id) == owner, 'Creator changed after transfer!');
     assert(erc721.owner_of(token_id) == buyer, 'New owner should be buyer');
 }
 
@@ -778,6 +807,8 @@ fn test_transfer_collection_ownership_updates_owner_and_mint_authority() {
     cheat_caller_address(ip_address, USER2(), CheatSpan::TargetCalls(1));
     let token_id = dispatcher.mint(collection_id, USER1(), IPFS_URI());
     assert(token_id == 1, 'New owner should mint');
+    let token = dispatcher.get_token(format!("{}:{}", collection_id, token_id));
+    assert(token.original_creator == USER2(), 'New owner should be creator');
 }
 
 #[test]
@@ -916,6 +947,12 @@ fn test_verification_functions() {
     assert(dispatcher.is_transferable_token(token_key), 'Token should be transferable');
     assert(dispatcher.is_collection_owner(collection_id, owner), 'Owner should be correct');
     stop_cheat_caller_address(address);
+}
+
+#[test]
+fn test_is_collection_owner_false_for_invalid_collection() {
+    let (dispatcher, _) = deploy_contract();
+    assert(!dispatcher.is_collection_owner(99, ZERO()), 'Invalid collection owner');
 }
 
 #[test]

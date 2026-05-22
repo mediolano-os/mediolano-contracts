@@ -49,6 +49,16 @@ fn BARE_CID() -> ByteArray {
 fn HTTP_URI() -> ByteArray {
     "https://example.com/metadata.json"
 }
+fn FUTURE_URI() -> ByteArray {
+    "hyperblob://future-content-address-123"
+}
+fn LONG_URI() -> ByteArray {
+    let mut uri: ByteArray = "";
+    for _ in 0_u32..2049_u32 {
+        uri.append_byte(97_u8);
+    };
+    uri
+}
 fn BASE_URI() -> ByteArray {
     "ipfs://QmCollectionMetadataHash/collection.json"
 }
@@ -136,6 +146,13 @@ fn test_constructor_empty_base_uri() {
     assert_eq!(collection.base_uri(), "");
 }
 
+#[test]
+fn test_contract_version() {
+    let owner = OWNER();
+    let (collection, _) = deploy_collection(owner, BASE_URI());
+    assert_eq!(collection.version(), "0.2.0");
+}
+
 // ─── uri() fallback behaviour ──────────────────────────────────────────────────
 
 #[test]
@@ -195,6 +212,19 @@ fn test_mint_item_ar_uri() {
 
     let erc1155 = IERC1155Dispatcher { contract_address: address };
     assert_eq!(erc1155.balance_of(recipient, TOKEN_ID_1), VALUE_1);
+}
+
+#[test]
+fn test_mint_item_future_uri_scheme() {
+    let owner = OWNER();
+    let (collection, address) = deploy_collection(owner, BASE_URI());
+    let recipient = deploy_receiver();
+
+    cheat_caller_address(address, owner, CheatSpan::TargetCalls(1));
+    collection.mint_item(recipient, TOKEN_ID_1, VALUE_1, FUTURE_URI());
+
+    let metadata = IERC1155MetadataURIDispatcher { contract_address: address };
+    assert_eq!(metadata.uri(TOKEN_ID_1), FUTURE_URI());
 }
 
 #[test]
@@ -321,25 +351,51 @@ fn test_mint_item_zero_value_rejected() {
 }
 
 #[test]
-#[should_panic(expected: 'URI must be ipfs:// or ar://')]
-fn test_mint_item_bare_cid_rejected() {
+fn test_mint_item_bare_cid_allowed() {
     let owner = OWNER();
     let (collection, address) = deploy_collection(owner, BASE_URI());
     let recipient = deploy_receiver();
 
     cheat_caller_address(address, owner, CheatSpan::TargetCalls(1));
     collection.mint_item(recipient, TOKEN_ID_1, VALUE_1, BARE_CID());
+
+    let metadata = IERC1155MetadataURIDispatcher { contract_address: address };
+    assert_eq!(metadata.uri(TOKEN_ID_1), BARE_CID());
 }
 
 #[test]
-#[should_panic(expected: 'URI must be ipfs:// or ar://')]
-fn test_mint_item_http_uri_rejected() {
+fn test_mint_item_http_uri_allowed() {
     let owner = OWNER();
     let (collection, address) = deploy_collection(owner, BASE_URI());
     let recipient = deploy_receiver();
 
     cheat_caller_address(address, owner, CheatSpan::TargetCalls(1));
     collection.mint_item(recipient, TOKEN_ID_1, VALUE_1, HTTP_URI());
+
+    let metadata = IERC1155MetadataURIDispatcher { contract_address: address };
+    assert_eq!(metadata.uri(TOKEN_ID_1), HTTP_URI());
+}
+
+#[test]
+#[should_panic(expected: 'Invalid URI length')]
+fn test_mint_item_empty_uri_rejected_for_new_token() {
+    let owner = OWNER();
+    let (collection, address) = deploy_collection(owner, BASE_URI());
+    let recipient = deploy_receiver();
+
+    cheat_caller_address(address, owner, CheatSpan::TargetCalls(1));
+    collection.mint_item(recipient, TOKEN_ID_1, VALUE_1, "");
+}
+
+#[test]
+#[should_panic(expected: 'Invalid URI length')]
+fn test_mint_item_long_uri_rejected_for_new_token() {
+    let owner = OWNER();
+    let (collection, address) = deploy_collection(owner, BASE_URI());
+    let recipient = deploy_receiver();
+
+    cheat_caller_address(address, owner, CheatSpan::TargetCalls(1));
+    collection.mint_item(recipient, TOKEN_ID_1, VALUE_1, LONG_URI());
 }
 
 // ─── Subsequent mint of same token_id ─────────────────────────────────────────

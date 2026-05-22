@@ -11,9 +11,7 @@ pub mod IPNft {
     use core::num::traits::Zero;
     use starknet::{ContractAddress, get_block_timestamp, get_caller_address};
     use crate::interfaces::IIPNFT::IIPNft;
-    use crate::types::{
-        bytearray_starts_with, MAX_BASE_URI_LEN, MAX_NAME_LEN, MAX_SYMBOL_LEN, MAX_TOKEN_URI_LEN,
-    };
+    use crate::types::{MAX_BASE_URI_LEN, MAX_NAME_LEN, MAX_SYMBOL_LEN, MAX_TOKEN_URI_LEN};
 
     component!(path: ERC721Component, storage: erc721, event: ERC721Event);
     component!(path: SRC5Component, storage: src5, event: SRC5Event);
@@ -147,26 +145,22 @@ pub mod IPNft {
         /// Mints a new ERC-721 token to the specified recipient.
         /// Only callable by the immutable IPCollection factory.
         ///
-        /// COMP-04: token_uri must begin with "ipfs://" or "ar://" to guarantee
-        /// permanent, content-addressed metadata storage.
-        /// COMP-02: recipient is stored as the immutable original_creator.
+        /// token_uri is stored permanently and must not be empty.
+        /// COMP-02: creator is stored as the immutable original_creator.
         /// COMP-03: block timestamp is stored as the immutable registered_at.
         fn mint(
             ref self: ContractState,
             recipient: ContractAddress,
             token_id: u256,
             token_uri: ByteArray,
+            creator: ContractAddress,
         ) {
             assert(get_caller_address() == self.registry.read(), 'Only registry');
 
             // R-05: token IDs must be > 0 (IPCollection assigns IDs starting at 1)
             assert(token_id != 0, 'Token ID cannot be zero');
+            assert(!creator.is_zero(), 'Creator is zero address');
             assert(token_uri.len() > 0 && token_uri.len() <= MAX_TOKEN_URI_LEN, 'Invalid URI length');
-
-            // COMP-04: only permanent, content-addressed storage URIs are legally valid
-            let valid_uri = bytearray_starts_with(@token_uri, @"ipfs://")
-                || bytearray_starts_with(@token_uri, @"ar://");
-            assert(valid_uri, 'URI must be ipfs:// or ar://');
 
             // mint intentionally does not call safe_mint; IP records can be minted to any
             // account/contract without requiring an ERC721 receiver callback.
@@ -174,7 +168,7 @@ pub mod IPNft {
             self.uris.write(token_id, token_uri);
 
             // COMP-02: store original creator — permanent, never overwritten
-            self.token_creators.write(token_id, recipient);
+            self.token_creators.write(token_id, creator);
 
             // COMP-03: store registration timestamp — permanent, never overwritten
             self.token_registered_at.write(token_id, get_block_timestamp());

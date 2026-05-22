@@ -22,6 +22,11 @@ With zero fees, Mediolano’s open-source protocol and dapp ensures immediate to
 
 The platform also introduces advanced monetization, enabling diverse approaches to licensing, royalties, and financing creators economies. These tools are designed to offer integrations with various ecosystems, including communities, games, and AI agents, unlocking the true power of Programmable IP for the Integrity Web.
 
+## Protocol Design
+
+The collections protocols prioritize security, performance, and simplicity. Shared invariants are kept small: immutable deployments, owner-gated minting, immutable metadata/provenance records, protocol-neutral metadata URIs, bounded input lengths, and explicit constructor validation.
+
+Feature parity is intentional where it protects the same invariant across standards. It is not used to copy every feature between ERC-721 and ERC-1155: ERC-721 keeps unique IP asset behavior and archive support, while ERC-1155 keeps edition-style token types and ERC-2981 royalty signaling.
 
 
 ## Roadmap
@@ -64,14 +69,16 @@ The platform also introduces advanced monetization, enabling diverse approaches 
 - `IPCollection` is an immutable registry and factory.
 - Each collection deploys its own immutable `IPNft` ERC-721 contract.
 - There is no global admin owner, upgrade function, mutable NFT class hash, or collection pause switch.
+- The registry constructor rejects a zero `IPNft` class hash.
 - Collection ownership can be transferred atomically by the current collection owner.
 - Ownership transfer only changes future mint authority; already minted token records remain unchanged.
 - Token legal records store immutable `metadata_uri`, `original_creator`, and `registered_at` fields.
+- The collection owner who mints is recorded as the immutable creator/author; the recipient only receives custody.
 - Token archive preserves the on-chain legal record instead of burning it.
 - Active ERC-721 tokens keep standard direct transfer behavior for wallet and marketplace composability.
 - Transfers routed through `IPCollection` additionally update protocol transfer stats and emit protocol transfer events.
 - `CollectionStats.total_transfers` counts only transfers routed through `IPCollection`; indexers should also read native `IPNft` ERC-721 `Transfer` events for complete transfer history.
-- Token metadata uses immutable per-token `ipfs://` or `ar://` URIs. Collection `base_uri` is informational and is not concatenated with token IDs.
+- Token metadata uses immutable per-token, protocol-neutral URIs. URIs must be non-empty and no longer than 2048 bytes; collection `base_uri` is informational and is not concatenated with token IDs.
 
 This architecture is designed for creator sovereignty and social-login wallet handoff flows. For example, a creator can initialize a collection through an embedded wallet and later transfer collection stewardship to a regular wallet without changing historical authorship records.
 
@@ -123,6 +130,20 @@ sncast --profile medialane-mainnet --wait deploy \
 ```
 
 See `contracts/MIP-Collections-ERC721/README.md` for the full contract-specific interface, storage, events, and deployment notes.
+
+## IP Programmable ERC-1155 Collections
+
+`contracts/IP-Programmable-ERC1155-Collections` contains immutable ERC-1155 collection contracts for edition-style IP assets.
+
+- `IPCollectionFactory` is a permissionless factory for standalone `IPCollection` deployments.
+- Each `IPCollection` is immutable and uses owner-gated minting.
+- Token type provenance stores immutable metadata URI, original creator, and registration timestamp on first mint.
+- The minter/collection owner is recorded as the immutable creator; the `to` address receives the minted balance.
+- Token URIs are protocol-neutral, non-empty, no longer than 2048 bytes, and written once per token type.
+- Factory and collection constructors reject zero owner/class-hash inputs.
+- ERC-2981 royalty signaling is available and defaults to 0%.
+
+See `contracts/IP-Programmable-ERC1155-Collections/README.md` for the full contract-specific interface, storage, events, and deployment notes.
 
 
 ## Getting Started
@@ -241,8 +262,9 @@ For the current MIP Collections ERC-721 mainnet flow, see `contracts/MIP-Collect
 ### Security Measures
 
 - **Contract-Specific Authorization**: Permissions are scoped per contract; MIP Collections ERC-721 uses immutable registry and collection-owner checks instead of a global admin.
-- **Immutable IP Collections**: MIP Collections ERC-721 has no global admin owner, no upgrade entrypoint, no mutable class hash, and no pause switch.
+- **Immutable IP Collections**: MIP Collections ERC-721 and IP Programmable ERC-1155 Collections are immutable contract systems without collection upgrade entrypoints.
 - **Permanent Provenance**: IP collection tokens preserve immutable metadata URI, original creator, and registration timestamp.
+- **Protocol-Neutral Metadata**: Collection metadata pointers are validated for presence and a 2048-byte maximum length on-chain; storage scheme validation stays in SDKs, frontends, and indexers.
 - **Transferable Stewardship**: Collection ownership can move atomically to another wallet for future mint authority without changing historical token records.
 - **Composable ERC-721 Transfers**: Active MIP collection tokens support direct ERC-721 transfers; the registry transfer path remains available for protocol stats/events.
 - **Reentrancy Protection**: Guards against reentrancy attacks

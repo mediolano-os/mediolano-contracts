@@ -22,13 +22,16 @@ pub trait IIPCollection<TContractState> {
     /// Also used as fallback `uri(token_id)` response for unminted token types.
     fn base_uri(self: @TContractState) -> ByteArray;
 
+    /// Returns the immutable implementation version for this deployed collection class.
+    fn version(self: @TContractState) -> ByteArray;
+
     // ── Minting ────────────────────────────────────────────────────────────────
 
     /// Mints `value` copies of a new or existing token type to `to`.
     ///
     /// Owner only. `to` must not be the zero address. `value` must be > 0.
     /// For new token types (first mint of this `token_id`):
-    ///   - `token_uri` is stored permanently and must start with `ipfs://` or `ar://`.
+    ///   - `token_uri` is stored permanently and must have a valid length.
     ///   - The caller (owner) is recorded as the original IP creator.
     ///   - Block timestamp is recorded as the registration date.
     /// For existing token types (subsequent mints): `token_uri` is ignored.

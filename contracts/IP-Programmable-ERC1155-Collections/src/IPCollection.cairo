@@ -30,7 +30,7 @@ pub mod IPCollection {
     use core::num::traits::Zero;
     use starknet::{ContractAddress, get_block_timestamp, get_caller_address};
     use crate::interfaces::IIPCollection::IIPCollection;
-    use crate::types::TokenData;
+    use crate::types::{TokenData, MAX_TOKEN_URI_LEN};
 
     component!(path: SRC5Component, storage: src5, event: SRC5Event);
     component!(path: OwnableComponent, storage: ownable, event: OwnableEvent);
@@ -136,6 +136,7 @@ pub mod IPCollection {
         base_uri: ByteArray,
         owner: ContractAddress,
     ) {
+        assert(!owner.is_zero(), 'Owner is zero address');
         // Initialize ERC1155 with empty base URI — we manage URIs ourselves.
         self.erc1155.initializer("");
         self.ownable.initializer(owner);
@@ -181,6 +182,10 @@ pub mod IPCollection {
 
         fn base_uri(self: @ContractState) -> ByteArray {
             self.collection_base_uri.read()
+        }
+
+        fn version(self: @ContractState) -> ByteArray {
+            "0.2.0"
         }
 
         // ── Minting ────────────────────────────────────────────────────────────
@@ -278,10 +283,12 @@ pub mod IPCollection {
             let timestamp = get_block_timestamp();
 
             if is_new {
-                // Validate URI only for new token types (first mint).
-                let valid_uri = Self::_starts_with(@token_uri, @"ipfs://")
-                    || Self::_starts_with(@token_uri, @"ar://");
-                assert(valid_uri, 'URI must be ipfs:// or ar://');
+                // Keep URI storage protocol-neutral so future metadata systems work without
+                // redeploying the collection implementation.
+                assert(
+                    token_uri.len() > 0 && token_uri.len() <= MAX_TOKEN_URI_LEN,
+                    'Invalid URI length',
+                );
 
                 self.token_uris.write(token_id, token_uri.clone());
                 self.token_creators.write(token_id, creator);
@@ -314,18 +321,5 @@ pub mod IPCollection {
                 );
         }
 
-        /// Returns true if `haystack` starts with `needle`.
-        fn _starts_with(haystack: @ByteArray, needle: @ByteArray) -> bool {
-            let needle_len = needle.len();
-            if haystack.len() < needle_len {
-                return false;
-            }
-            for i in 0..needle_len {
-                if haystack.at(i) != needle.at(i) {
-                    return false;
-                }
-            };
-            true
-        }
     }
 }

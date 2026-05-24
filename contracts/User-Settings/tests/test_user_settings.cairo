@@ -1,499 +1,349 @@
-use core::hash::{HashStateExTrait, HashStateTrait};
-use core::poseidon::PoseidonTrait;
-
+use openzeppelin_introspection::interface::{ISRC5Dispatcher, ISRC5DispatcherTrait};
 use snforge_std::{
-    ContractClassTrait, DeclareResult, DeclareResultTrait, declare, start_cheat_block_timestamp,
-    start_cheat_caller_address, stop_cheat_block_timestamp, stop_cheat_caller_address,
+    CheatSpan, ContractClassTrait, DeclareResultTrait, cheat_block_timestamp, cheat_caller_address,
+    declare,
 };
-use starknet::{ContractAddress, contract_address_const};
-
+use starknet::ContractAddress;
 use user_settings::interfaces::settings_interfaces::{
-    IEncryptedPreferencesRegistryDispatcher, IEncryptedPreferencesRegistryDispatcherTrait,
+    IUSER_SETTINGS_REGISTRY_ID, IUserSettingsRegistryDispatcher,
+    IUserSettingsRegistryDispatcherTrait,
 };
-use user_settings::structs::settings_structs::{IPProtectionLevel, NetworkType};
-fn owner() -> ContractAddress {
-    contract_address_const::<'owner'>()
+use user_settings::mocks::signature_account::{
+    ISignatureAccountAdminDispatcher, ISignatureAccountAdminDispatcherTrait,
+};
+use user_settings::structs::settings_structs::IPProtectionLevel;
+
+fn USER1() -> ContractAddress {
+    0x101.try_into().unwrap()
 }
 
-fn mediolano_app() -> ContractAddress {
-    contract_address_const::<'mediolano_app'>()
+fn USER2() -> ContractAddress {
+    0x102.try_into().unwrap()
 }
 
-fn deploy_contract() -> (
-    IEncryptedPreferencesRegistryDispatcher, ContractAddress, ContractAddress,
-) {
-    let contract = declare("EncryptedPreferencesRegistry").unwrap().contract_class();
-    let owner = owner();
-    let mediolano_app = mediolano_app();
-    let constructor_calldata: Array<felt252> = array![owner.into(), mediolano_app.into()];
-    let (contract_address, _) = contract.deploy(@constructor_calldata).unwrap();
-
-    let dispatcher = IEncryptedPreferencesRegistryDispatcher { contract_address };
-
-    (dispatcher, contract_address, owner)
+fn RELAYER() -> ContractAddress {
+    0x103.try_into().unwrap()
 }
 
-#[test]
-fn test_store_and_update_account_details() {
-    let (dispatcher, this_contract, owner) = deploy_contract();
-    let current_timestamp = 400_u64;
-    let owner_name = 'owner';
-    let owner_email = 'owner@gmail.com';
-    let username = 'owner_user_name';
+fn ZERO() -> ContractAddress {
+    0.try_into().unwrap()
+}
 
-    start_cheat_block_timestamp(this_contract, current_timestamp);
-    start_cheat_caller_address(this_contract, owner);
-    dispatcher
-        .store_account_details(
-            owner_name,
-            owner_email,
-            username,
-            current_timestamp //nonce, current_timestamp, version, pub_key, wallet_signature_arr
-        );
-    stop_cheat_caller_address(this_contract);
-    stop_cheat_block_timestamp(this_contract);
+fn IPFS_URI() -> ByteArray {
+    "ipfs://bafybeisettings"
+}
 
-    let mut account_details = dispatcher.get_account_settings(owner);
-    assert(account_details.name == owner_name, 'Settings not updated properly');
+fn AR_URI() -> ByteArray {
+    "ar://encrypted-settings"
+}
 
-    // let mut new_wallet_signature_arr: Array<felt252> = array!['r', 's'];
+fn HTTP_URI() -> ByteArray {
+    "https://example.com/settings.json"
+}
 
-    start_cheat_block_timestamp(this_contract, current_timestamp);
-    start_cheat_caller_address(this_contract, owner);
-    dispatcher
-        .update_account_details(
-            Option::Some('new name'),
-            Option::None,
-            Option::None,
-            current_timestamp //2, current_timestamp, version, pub_key, new_wallet_signature_arr
-        );
-    stop_cheat_caller_address(this_contract);
-    stop_cheat_block_timestamp(this_contract);
+fn deploy_registry() -> IUserSettingsRegistryDispatcher {
+    let contract = declare("UserSettingsRegistry").unwrap().contract_class();
+    let calldata = array![];
+    let (contract_address, _) = contract.deploy(@calldata).unwrap();
+    IUserSettingsRegistryDispatcher { contract_address }
+}
 
-    account_details = dispatcher.get_account_settings(owner);
-    assert(account_details.name == 'new name', 'Settings not updated properly');
+fn deploy_signature_account(owner: ContractAddress) -> ISignatureAccountAdminDispatcher {
+    let contract = declare("SignatureAccount").unwrap().contract_class();
+    let calldata = array![owner.into(), 0];
+    let (contract_address, _) = contract.deploy(@calldata).unwrap();
+    ISignatureAccountAdminDispatcher { contract_address }
 }
 
 #[test]
-fn test_store_and_update_ip_management_settings() {
-    let (dispatcher, this_contract, owner) = deploy_contract();
-    // let (current_timestamp, version, pub_key, mut wallet_signature) = (400_u64, 1, 'pub_key',
-    // array!['s', 'r']);
-    let current_timestamp = 400_u64;
-    let mut protection_level = 0;
-    let mut automatic_ip_registration = true;
+fn test_any_wallet_can_set_own_settings() {
+    let registry = deploy_registry();
 
-    start_cheat_caller_address(this_contract, owner);
-    start_cheat_block_timestamp(this_contract, current_timestamp);
-    dispatcher
-        .store_ip_management_settings(
-            protection_level,
-            automatic_ip_registration,
-            current_timestamp //nonce, current_timestamp, version, pub_key, wallet_signature
-        );
-    let mut ip_management_settings = dispatcher.get_ip_settings(owner);
-    stop_cheat_block_timestamp(this_contract);
-    stop_cheat_caller_address(this_contract);
+    cheat_caller_address(registry.contract_address, USER1(), CheatSpan::TargetCalls(1));
+    registry.set_settings(1, true, IPFS_URI(), 'settings_hash');
 
+    let settings = registry.get_settings(USER1());
+    assert(settings.user == USER1(), 'user should match');
     assert(
-        ip_management_settings.ip_protection_level == IPProtectionLevel::STANDARD,
-        'Store setting 1 failed',
+        settings.default_ip_protection_level == IPProtectionLevel::ADVANCED,
+        'level should be advanced',
     );
-    assert(ip_management_settings.automatic_ip_registration == true, 'Store setting 2 failed');
+    assert(settings.automatic_ip_registration, 'auto registration');
+    assert(settings.encrypted_preferences_uri == IPFS_URI(), 'uri should match');
+    assert(settings.encrypted_preferences_hash == 'settings_hash', 'hash should match');
+    assert(settings.revision == 1, 'revision should be one');
+    assert(registry.get_nonce(USER1()) == 1, 'nonce should be one');
+    assert(settings.exists, 'settings should exist');
+}
 
-    // wallet_signature = array!['r', 's'];
-    // nonce += 1;
-    protection_level = 1;
-    automatic_ip_registration = false;
-    start_cheat_block_timestamp(this_contract, current_timestamp);
-    start_cheat_caller_address(this_contract, owner);
-    dispatcher
-        .update_ip_management_settings(
-            Option::Some(protection_level),
-            Option::Some(automatic_ip_registration),
-            current_timestamp //nonce, current_timestamp, version, pub_key, wallet_signature
-        );
-    stop_cheat_caller_address(this_contract);
-    stop_cheat_block_timestamp(this_contract);
-    ip_management_settings = dispatcher.get_ip_settings(owner);
+#[test]
+fn test_settings_are_keyed_to_caller() {
+    let registry = deploy_registry();
 
+    cheat_caller_address(registry.contract_address, USER1(), CheatSpan::TargetCalls(1));
+    registry.set_settings(0, false, "", 0);
+
+    cheat_caller_address(registry.contract_address, USER2(), CheatSpan::TargetCalls(1));
+    registry.set_settings(1, true, AR_URI(), 'other_hash');
+
+    let user1_settings = registry.get_settings(USER1());
+    let user2_settings = registry.get_settings(USER2());
+
+    assert(user1_settings.user == USER1(), 'user1 owns record');
+    assert(user2_settings.user == USER2(), 'user2 owns record');
     assert(
-        ip_management_settings.ip_protection_level == IPProtectionLevel::ADVANCED,
-        'Store setting failed',
+        user1_settings.default_ip_protection_level == IPProtectionLevel::STANDARD, 'user1 level',
     );
     assert(
-        ip_management_settings.automatic_ip_registration == automatic_ip_registration,
-        'Store setting failed',
+        user2_settings.default_ip_protection_level == IPProtectionLevel::ADVANCED, 'user2 level',
     );
 }
 
 #[test]
-fn test_store_and_update_notification_settings() {
-    let (dispatcher, this_contract, owner) = deploy_contract();
-    // let (current_timestamp, version, pub_key, mut wallet_signature) = (400_u64, 1, 'pub_key',
-    // array!['s', 'r']);
-    let current_timestamp = 400_u64;
+fn test_update_ip_defaults_preserves_pointer() {
+    let registry = deploy_registry();
 
-    let enable_notifications = true;
-    let ip_updates = true;
-    let mut blockchain_events = true;
-    let account_activity = true;
-    // let mut nonce = 1;
+    cheat_block_timestamp(registry.contract_address, 1000, CheatSpan::TargetCalls(1));
+    cheat_caller_address(registry.contract_address, USER1(), CheatSpan::TargetCalls(1));
+    registry.set_settings(0, false, IPFS_URI(), 'settings_hash');
 
-    start_cheat_block_timestamp(this_contract, current_timestamp);
-    start_cheat_caller_address(this_contract, owner);
-    dispatcher
-        .store_notification_settings(
-            enable_notifications,
-            ip_updates,
-            blockchain_events,
-            account_activity,
-            current_timestamp //nonce, current_timestamp, version, pub_key, wallet_signature
+    cheat_block_timestamp(registry.contract_address, 2000, CheatSpan::TargetCalls(1));
+    cheat_caller_address(registry.contract_address, USER1(), CheatSpan::TargetCalls(1));
+    registry.update_ip_defaults(1, true);
+
+    let settings = registry.get_settings(USER1());
+    assert(settings.default_ip_protection_level == IPProtectionLevel::ADVANCED, 'level updated');
+    assert(settings.automatic_ip_registration, 'auto updated');
+    assert(settings.encrypted_preferences_uri == IPFS_URI(), 'uri preserved');
+    assert(settings.encrypted_preferences_hash == 'settings_hash', 'hash preserved');
+    assert(settings.revision == 2, 'revision increments');
+    assert(settings.updated_at == 2000, 'timestamp updated');
+}
+
+#[test]
+fn test_update_preferences_pointer() {
+    let registry = deploy_registry();
+
+    cheat_caller_address(registry.contract_address, USER1(), CheatSpan::TargetCalls(1));
+    registry.set_settings(0, false, "", 0);
+
+    cheat_caller_address(registry.contract_address, USER1(), CheatSpan::TargetCalls(1));
+    registry.update_preferences_pointer(AR_URI(), 'new_hash');
+
+    let settings = registry.get_settings(USER1());
+    assert(settings.encrypted_preferences_uri == AR_URI(), 'uri updated');
+    assert(settings.encrypted_preferences_hash == 'new_hash', 'hash updated');
+    assert(settings.revision == 2, 'revision increments');
+}
+
+#[test]
+fn test_clear_preferences_pointer() {
+    let registry = deploy_registry();
+
+    cheat_caller_address(registry.contract_address, USER1(), CheatSpan::TargetCalls(1));
+    registry.set_settings(0, false, IPFS_URI(), 'settings_hash');
+
+    cheat_caller_address(registry.contract_address, USER1(), CheatSpan::TargetCalls(1));
+    registry.clear_preferences_pointer();
+
+    let settings = registry.get_settings(USER1());
+    assert(settings.encrypted_preferences_uri == "", 'uri cleared');
+    assert(settings.encrypted_preferences_hash == 0, 'hash cleared');
+    assert(settings.revision == 2, 'revision increments');
+}
+
+#[test]
+fn test_delete_settings_marks_record_inactive() {
+    let registry = deploy_registry();
+
+    cheat_caller_address(registry.contract_address, USER1(), CheatSpan::TargetCalls(1));
+    registry.set_settings(1, true, IPFS_URI(), 'settings_hash');
+
+    cheat_caller_address(registry.contract_address, USER1(), CheatSpan::TargetCalls(1));
+    registry.delete_settings();
+
+    assert(!registry.has_settings(USER1()), 'settings deleted');
+    assert(registry.get_revision(USER1()) == 2, 'revision retained');
+}
+
+#[test]
+#[should_panic(expected: 'Settings do not exist')]
+fn test_get_settings_reverts_after_delete() {
+    let registry = deploy_registry();
+
+    cheat_caller_address(registry.contract_address, USER1(), CheatSpan::TargetCalls(1));
+    registry.set_settings(1, true, IPFS_URI(), 'settings_hash');
+
+    cheat_caller_address(registry.contract_address, USER1(), CheatSpan::TargetCalls(1));
+    registry.delete_settings();
+
+    registry.get_settings(USER1());
+}
+
+#[test]
+fn test_relayer_can_set_settings_with_account_signature() {
+    let registry = deploy_registry();
+    let account = deploy_signature_account(USER1());
+    let user = account.contract_address;
+    let deadline = 5000;
+    let nonce = registry.get_nonce(user);
+    let message_hash = registry
+        .hash_settings_update(user, 1, true, IPFS_URI(), 'settings_hash', nonce, deadline);
+
+    cheat_caller_address(account.contract_address, USER1(), CheatSpan::TargetCalls(1));
+    account.set_expected_hash(message_hash);
+
+    cheat_block_timestamp(registry.contract_address, 1000, CheatSpan::TargetCalls(1));
+    cheat_caller_address(registry.contract_address, RELAYER(), CheatSpan::TargetCalls(1));
+    registry
+        .set_settings_for(
+            user, 1, true, IPFS_URI(), 'settings_hash', nonce, deadline, array!['sig'],
         );
-    stop_cheat_caller_address(this_contract);
-    stop_cheat_block_timestamp(this_contract);
 
-    let mut notification_settings = dispatcher.get_notification_settings(owner);
-    assert(notification_settings.blockchain_events, 'Store setting failed');
-
-    blockchain_events = false;
-    // wallet_signature = array!['r', 's'];
-
-    start_cheat_block_timestamp(this_contract, current_timestamp);
-    start_cheat_caller_address(this_contract, owner);
-    dispatcher
-        .update_notification_settings(
-            Option::Some(enable_notifications),
-            Option::Some(ip_updates),
-            Option::Some(blockchain_events),
-            Option::Some(account_activity),
-            current_timestamp // nonce + 1, current_timestamp, version, pub_key, wallet_signature
-        );
-    notification_settings = dispatcher.get_notification_settings(owner);
-    stop_cheat_caller_address(this_contract);
-    stop_cheat_block_timestamp(this_contract);
-
-    assert(!notification_settings.blockchain_events, 'Update setting failed')
+    let settings = registry.get_settings(user);
+    assert(settings.user == user, 'user should match');
+    assert(settings.default_ip_protection_level == IPProtectionLevel::ADVANCED, 'level updated');
+    assert(settings.revision == 1, 'revision should increment');
+    assert(registry.get_nonce(user) == 1, 'nonce should increment');
 }
 
 #[test]
-fn test_store_and_update_security_settings() {
-    let (dispatcher, this_contract, owner) = deploy_contract();
-    // let (current_timestamp, version, pub_key, mut wallet_signature, mut nonce) = (400_u64, 1,
-    // 'pub_key', array!['s', 'r'], 1);
-    let current_timestamp = 400_u64;
-    let mut password = 'password';
+#[should_panic(expected: 'Invalid nonce')]
+fn test_relayer_rejects_replayed_nonce() {
+    let registry = deploy_registry();
+    let account = deploy_signature_account(USER1());
+    let user = account.contract_address;
+    let deadline = 5000;
+    let message_hash = registry.hash_settings_update(user, 0, false, "", 0, 0, deadline);
 
-    let felt_caller: felt252 = owner.into();
+    cheat_caller_address(account.contract_address, USER1(), CheatSpan::TargetCalls(1));
+    account.set_expected_hash(message_hash);
 
-    let hashed_password: felt252 = PoseidonTrait::new()
-        .update_with(password)
-        .update_with(current_timestamp)
-        .update_with(felt_caller)
-        .finalize()
-        .into();
+    cheat_block_timestamp(registry.contract_address, 1000, CheatSpan::TargetCalls(1));
+    cheat_caller_address(registry.contract_address, RELAYER(), CheatSpan::TargetCalls(1));
+    registry.set_settings_for(user, 0, false, "", 0, 0, deadline, array!['sig']);
 
-    start_cheat_block_timestamp(this_contract, current_timestamp);
-    start_cheat_caller_address(this_contract, owner);
-    dispatcher
-        .store_security_settings(
-            password,
-            current_timestamp //nonce, current_timestamp, version, pub_key, wallet_signature
-        );
-    let mut security_settings = dispatcher.get_security_settings(owner);
-    stop_cheat_caller_address(this_contract);
-    stop_cheat_block_timestamp(this_contract);
-
-    assert(security_settings.password == hashed_password, 'Store setting failed');
-
-    password = 'new_password';
-
-    start_cheat_block_timestamp(this_contract, current_timestamp);
-    start_cheat_caller_address(this_contract, owner);
-    dispatcher
-        .update_security_settings(
-            password,
-            current_timestamp //nonce, current_timestamp, version, pub_key, wallet_signature
-        );
-    stop_cheat_caller_address(this_contract);
-    stop_cheat_block_timestamp(this_contract);
-    security_settings = dispatcher.get_security_settings(owner);
-    // assert(security_settings.password == 'new_password', 'Update Setting failed')
-// These two will fail, simply because the hash of the password is what is stored, not the
-// password
-
+    cheat_block_timestamp(registry.contract_address, 1000, CheatSpan::TargetCalls(1));
+    cheat_caller_address(registry.contract_address, RELAYER(), CheatSpan::TargetCalls(1));
+    registry.set_settings_for(user, 0, false, "", 0, 0, deadline, array!['sig']);
 }
 
 #[test]
-fn test_store_and_update_network_settings() {
-    let (dispatcher, this_contract, owner) = deploy_contract();
-    // let (current_timestamp, version, pub_key, mut wallet_signature, mut nonce) = (400_u64, 1,
-    // 'pub_key', array!['s', 'r'], 1);
-    let current_timestamp = 400_u64;
-    let mut network_type = 0;
-    let mut gas_price_preference = 0;
+#[should_panic(expected: 'Invalid nonce')]
+fn test_direct_write_invalidates_pending_relay_signature() {
+    let registry = deploy_registry();
+    let account = deploy_signature_account(USER1());
+    let user = account.contract_address;
+    let deadline = 5000;
+    let message_hash = registry.hash_settings_update(user, 0, false, "", 0, 0, deadline);
 
-    start_cheat_block_timestamp(this_contract, current_timestamp);
-    start_cheat_caller_address(this_contract, owner);
-    dispatcher
-        .store_network_settings(
-            network_type,
-            gas_price_preference,
-            current_timestamp //nonce, current_timestamp, version, pub_key, wallet_signature
-        );
-    stop_cheat_caller_address(this_contract);
-    stop_cheat_block_timestamp(this_contract);
-    let mut network_settings = dispatcher.get_network_settings(owner);
+    cheat_caller_address(account.contract_address, USER1(), CheatSpan::TargetCalls(1));
+    account.set_expected_hash(message_hash);
 
-    assert(network_settings.network_type == NetworkType::TESTNET, 'Store setting failed');
+    cheat_caller_address(registry.contract_address, user, CheatSpan::TargetCalls(1));
+    registry.set_settings(1, true, IPFS_URI(), 'settings_hash');
 
-    network_type = 1;
-    gas_price_preference = 1;
-
-    start_cheat_block_timestamp(this_contract, current_timestamp);
-    start_cheat_caller_address(this_contract, owner);
-    dispatcher
-        .update_network_settings(
-            Option::Some(network_type), Option::Some(gas_price_preference), current_timestamp,
-        );
-    stop_cheat_caller_address(this_contract);
-    stop_cheat_block_timestamp(this_contract);
-    network_settings = dispatcher.get_network_settings(owner);
-
-    assert(network_settings.network_type == NetworkType::MAINNET, 'Update setting failed');
+    cheat_block_timestamp(registry.contract_address, 1000, CheatSpan::TargetCalls(1));
+    cheat_caller_address(registry.contract_address, RELAYER(), CheatSpan::TargetCalls(1));
+    registry.set_settings_for(user, 0, false, "", 0, 0, deadline, array!['sig']);
 }
 
 #[test]
-fn test_store_advanced_settings() {
-    let (dispatcher, this_contract, owner) = deploy_contract();
-    // let (current_timestamp, version, pub_key, mut wallet_signature, nonce) = (400_u64, 1,
-    // 'pub_key', array!['s', 'r'], 1);
-    let current_timestamp = 400_u64;
-    let api_key = 'api_key';
+#[should_panic(expected: 'Signature expired')]
+fn test_relayer_rejects_expired_signature() {
+    let registry = deploy_registry();
+    let account = deploy_signature_account(USER1());
+    let user = account.contract_address;
+    let deadline = 5000;
 
-    start_cheat_block_timestamp(this_contract, current_timestamp);
-    start_cheat_caller_address(this_contract, owner);
-    dispatcher
-        .store_advanced_settings(
-            api_key,
-            current_timestamp //nonce, current_timestamp, version, pub_key, wallet_signature
-        );
-    stop_cheat_caller_address(this_contract);
-    stop_cheat_block_timestamp(this_contract);
-
-    let advanced_settings = dispatcher.get_advanced_settings(owner);
-    assert(advanced_settings.api_key == api_key, 'Store setting failed')
+    cheat_block_timestamp(registry.contract_address, 5001, CheatSpan::TargetCalls(1));
+    cheat_caller_address(registry.contract_address, RELAYER(), CheatSpan::TargetCalls(1));
+    registry.set_settings_for(user, 0, false, "", 0, 0, deadline, array!['sig']);
 }
 
 #[test]
-fn test_store_x_verification() {
-    let (dispatcher, this_contract, owner) = deploy_contract();
-    // let (current_timestamp, version, pub_key, mut wallet_signature, mut nonce) = (400_u64, 1,
-    // 'pub_key', array!['s', 'r'], 1);
-    let current_timestamp = 400_u64;
+#[should_panic(expected: 'Unexpected hash')]
+fn test_relayer_rejects_invalid_signature_hash() {
+    let registry = deploy_registry();
+    let account = deploy_signature_account(USER1());
+    let user = account.contract_address;
+    let deadline = 5000;
 
-    let x_handler = 'my_x_handler';
+    cheat_caller_address(account.contract_address, USER1(), CheatSpan::TargetCalls(1));
+    account.set_expected_hash('different_hash');
 
-    start_cheat_block_timestamp(this_contract, current_timestamp);
-    start_cheat_caller_address(this_contract, owner);
-    dispatcher
-        .store_X_verification(
-            true,
-            current_timestamp,
-            x_handler //nonce, current_timestamp, version, pub_key, wallet_signature, x_handler
-        );
-    stop_cheat_caller_address(this_contract);
-    stop_cheat_block_timestamp(this_contract);
-}
-
-// #[test]
-// fn test_regenerate_api_key() {
-//     let (dispatcher, this_contract, owner) = deploy_contract();
-//     // let (current_timestamp, version, pub_key, mut wallet_signature) = (400_u64, 1, 'pub_key',
-//     array!['s', 'r']);
-//     let current_timestamp = 400_u64;
-// }
-
-#[test]
-fn test_delete_account() {
-    let (dispatcher, this_contract, owner) = deploy_contract();
-    // let (current_timestamp, version, pub_key, mut wallet_signature, mut nonce) = (400_u64, 1,
-    // 'pub_key', array!['s', 'r'], 1);
-    let current_timestamp = 400_u64;
-
-    start_cheat_block_timestamp(this_contract, current_timestamp);
-    start_cheat_caller_address(this_contract, owner);
-    dispatcher.delete_account(current_timestamp);
-    dispatcher.delete_account(current_timestamp);
-    stop_cheat_caller_address(this_contract);
-    stop_cheat_block_timestamp(this_contract);
-
-    let account_settings = dispatcher.get_account_settings(owner);
-    assert(account_settings == Default::default(), 'Delete Account Failed');
+    cheat_block_timestamp(registry.contract_address, 1000, CheatSpan::TargetCalls(1));
+    cheat_caller_address(registry.contract_address, RELAYER(), CheatSpan::TargetCalls(1));
+    registry
+        .set_settings_for(user, 1, true, IPFS_URI(), 'settings_hash', 0, deadline, array!['sig']);
 }
 
 #[test]
-fn test_unauthorized_access() {
-    let (dispatcher, this_contract, owner) = deploy_contract();
-    let unauthorized_user = contract_address_const::<'unauthorized_user'>();
-    let current_timestamp = 400_u64;
+fn test_supports_user_settings_interface() {
+    let registry = deploy_registry();
+    let src5 = ISRC5Dispatcher { contract_address: registry.contract_address };
 
-    start_cheat_caller_address(this_contract, unauthorized_user);
-    start_cheat_block_timestamp(this_contract, current_timestamp);
-    
-    assert_panic(
-        dispatcher.store_account_details(
-            'test',
-            'test@test.com',
-            'username',
-            current_timestamp
-        )
-    );
-    
-    stop_cheat_caller_address(this_contract);
-    stop_cheat_block_timestamp(this_contract);
+    assert(src5.supports_interface(IUSER_SETTINGS_REGISTRY_ID), 'interface supported');
 }
 
 #[test]
-fn test_timestamp_validation() {
-    let (dispatcher, this_contract, owner) = deploy_contract();
-    let current_timestamp = get_block_timestamp();
-    let future_timestamp = current_timestamp + 600_u64; // 10 minutes in the future
-    let past_timestamp = current_timestamp - 600_u64; // 10 minutes in the past
+#[should_panic(expected: 'URI must be ipfs:// or ar://')]
+fn test_rejects_http_preferences_uri() {
+    let registry = deploy_registry();
 
-    start_cheat_caller_address(this_contract, owner);
-    
-    // Test future timestamp (should fail)
-    assert_panic(
-        dispatcher.store_account_details(
-            'test',
-            'test@test.com',
-            'username',
-            future_timestamp
-        )
-    );
-    
-    // Test past timestamp (should fail)
-    assert_panic(
-        dispatcher.store_account_details(
-            'test',
-            'test@test.com',
-            'username',
-            past_timestamp
-        )
-    );
-    
-    stop_cheat_caller_address(this_contract);
+    cheat_caller_address(registry.contract_address, USER1(), CheatSpan::TargetCalls(1));
+    registry.set_settings(0, false, HTTP_URI(), 'settings_hash');
 }
 
 #[test]
-fn test_invalid_protection_level() {
-    let (dispatcher, this_contract, owner) = deploy_contract();
-    let current_timestamp = 400_u64;
-    let invalid_protection_level = 2; // Only 0 (STANDARD) and 1 (ENHANCED) are valid
+#[should_panic(expected: 'Empty URI needs zero hash')]
+fn test_empty_uri_requires_zero_hash() {
+    let registry = deploy_registry();
 
-    start_cheat_caller_address(this_contract, owner);
-    start_cheat_block_timestamp(this_contract, current_timestamp);
-    
-    assert_panic(
-        dispatcher.store_ip_management_settings(
-            invalid_protection_level,
-            true,
-            current_timestamp
-        )
-    );
-    
-    stop_cheat_caller_address(this_contract);
-    stop_cheat_block_timestamp(this_contract);
+    cheat_caller_address(registry.contract_address, USER1(), CheatSpan::TargetCalls(1));
+    registry.set_settings(0, false, "", 'settings_hash');
 }
 
 #[test]
-fn test_event_emission() {
-    let (dispatcher, this_contract, owner) = deploy_contract();
-    let current_timestamp = 400_u64;
-    let owner_name = 'owner';
+#[should_panic(expected: 'Hash is zero')]
+fn test_non_empty_uri_requires_hash() {
+    let registry = deploy_registry();
 
-    start_cheat_caller_address(this_contract, owner);
-    start_cheat_block_timestamp(this_contract, current_timestamp);
-    
-    dispatcher.store_account_details(
-        owner_name,
-        'owner@test.com',
-        'username',
-        current_timestamp
-    );
-    
-    // Verify SettingUpdated event
-    assert_event_emitted(
-        SettingUpdated {
-            user: owner,
-            setting_type: 1, // Account settings
-            timestamp: current_timestamp
-        }
-    );
-    
-    stop_cheat_caller_address(this_contract);
-    stop_cheat_block_timestamp(this_contract);
+    cheat_caller_address(registry.contract_address, USER1(), CheatSpan::TargetCalls(1));
+    registry.set_settings(0, false, IPFS_URI(), 0);
 }
 
 #[test]
-fn test_storage_consistency() {
-    let (dispatcher, this_contract, owner) = deploy_contract();
-    let current_timestamp = 400_u64;
-    let owner_name = 'owner';
+#[should_panic(expected: 'Invalid protection level')]
+fn test_rejects_invalid_protection_level() {
+    let registry = deploy_registry();
 
-    start_cheat_caller_address(this_contract, owner);
-    start_cheat_block_timestamp(this_contract, current_timestamp);
-    
-    dispatcher.store_account_details(
-        owner_name,
-        'owner@test.com',
-        'username',
-        current_timestamp
-    );
-    
-    // Verify storage updates
-    let account_details = dispatcher.get_account_settings(owner);
-    assert(account_details.name == owner_name, 'Name not stored correctly');
-    assert(account_details.email == 'owner@test.com', 'Email not stored correctly');
-    assert(account_details.username == 'username', 'Username not stored correctly');
-    
-    stop_cheat_caller_address(this_contract);
-    stop_cheat_block_timestamp(this_contract);
+    cheat_caller_address(registry.contract_address, USER1(), CheatSpan::TargetCalls(1));
+    registry.set_settings(2, false, "", 0);
 }
 
 #[test]
-fn test_network_settings() {
-    let (dispatcher, this_contract, owner) = deploy_contract();
-    let current_timestamp = 400_u64;
-    
-    start_cheat_caller_address(this_contract, owner);
-    start_cheat_block_timestamp(this_contract, current_timestamp);
-    
-    // Store initial settings
-    dispatcher.store_network_settings(
-        1, // MAINNET
-        1, // MEDIUM gas price preference
-        current_timestamp
-    );
-    
-    // Verify initial settings
-    let network_settings = dispatcher.get_network_settings(owner);
-    assert(network_settings.network_type == NetworkType::MAINNET, 'Network type not set correctly');
-    assert(network_settings.gas_price_preference == GasPricePreference::MEDIUM, 'Gas preference not set correctly');
-    
-    // Update settings
-    dispatcher.update_network_settings(
-        Option::Some(0), // TESTNET
-        Option::Some(0), // LOW gas price preference
-        current_timestamp
-    );
-    
-    // Verify updated settings
-    let updated_settings = dispatcher.get_network_settings(owner);
-    assert(updated_settings.network_type == NetworkType::TESTNET, 'Network type not updated correctly');
-    assert(updated_settings.gas_price_preference == GasPricePreference::LOW, 'Gas preference not updated correctly');
-    
-    stop_cheat_caller_address(this_contract);
-    stop_cheat_block_timestamp(this_contract);
+#[should_panic(expected: 'Settings do not exist')]
+fn test_update_requires_existing_settings() {
+    let registry = deploy_registry();
+
+    cheat_caller_address(registry.contract_address, USER1(), CheatSpan::TargetCalls(1));
+    registry.update_ip_defaults(0, true);
+}
+
+#[test]
+#[should_panic(expected: 'Settings do not exist')]
+fn test_get_missing_settings_reverts() {
+    let registry = deploy_registry();
+
+    registry.get_settings(USER1());
+}
+
+#[test]
+#[should_panic(expected: 'User is zero address')]
+fn test_zero_caller_rejected() {
+    let registry = deploy_registry();
+
+    cheat_caller_address(registry.contract_address, ZERO(), CheatSpan::TargetCalls(1));
+    registry.set_settings(0, false, "", 0);
 }

@@ -1,175 +1,63 @@
-# IP Negotiation Escrow Smart Contract
+# IP Negotiation Escrow
 
-A Cairo smart contract for facilitating secure escrow services in IP (Intellectual Property) negotiations on the Starknet blockchain.
+`IPNegotiationEscrow` is a Mediolano service contract for escrowed negotiation around an existing IP asset.
 
-## Overview
+A seller creates a listing asset that points to the IP asset being negotiated, the asking price, listing metadata, and proposed terms. A buyer funds the escrow, the seller submits fulfillment or license-transfer proof, and the buyer approves release to the seller.
 
-This smart contract implements an escrow system for IP negotiations, enabling secure transactions between IP sellers and buyers. It ensures that funds are safely held in escrow and only released to the seller upon fulfillment of the transaction conditions.
+## Service Declaration
 
-## Features
+| Field | Value |
+| --- | --- |
+| `service_id` | `ip-negotiation-escrow` |
+| `asset_standard` | ERC721 |
+| `asset_role` | Non-transferable negotiation listing / escrow record for an existing IP asset |
+| `transferability` | non-transferable |
+| `access_semantics` | Listing state, buyer approval, seller claims, and buyer refunds derive from escrow records, not from transfer of the ERC-721 |
+| `marketplace_visibility` | display/index as a negotiation listing asset; no default resale |
+| `metadata_uri_policy` | listing, terms, and fulfillment URIs must be `ipfs://` or `ar://` |
+| `src5_interface_id` | `IIP_NEGOTIATION_ESCROW_ID` |
 
-- **Order Creation**: Allows IP sellers to create escrow orders with specific pricing and token identifiers.
-- **Order Management**: Provides functionality to retrieve, modify, and track orders.
-- **Secure Fund Handling**: Manages the secure deposit of funds by buyers and ensures proper transfer upon transaction fulfillment.
-- **Order Fulfillment**: Enables sellers to fulfill orders and receive payment once conditions are met.
-- **Event Tracking**: Emits events for key actions such as order creation, fund deposits, and order fulfillment.
-- **Token-to-Order Mapping**: Associates each tokenId with a unique order for easy reference.
+## Negotiation Flow
 
-## Architecture
+1. The seller calls `create_listing` with:
+   - existing IP asset contract;
+   - existing IP asset token ID;
+   - ERC-20 payment token;
+   - price;
+   - content-addressed listing URI and hash;
+   - content-addressed terms URI and hash;
+   - deadline.
+2. The contract mints a non-transferable ERC-721 negotiation listing asset to the seller.
+3. A buyer calls `fund_listing`, depositing the full price into escrow.
+4. The seller calls `submit_fulfillment` with a content-addressed fulfillment or license-transfer proof.
+5. The buyer calls `approve_fulfillment`.
+6. The approved amount becomes claimable by the seller through `claim_seller_funds`.
 
-The contract implements the following core components:
+## Payment And Refunds
 
-### Order Structure
+The full price is escrowed up front. Deposits validate exact ERC-20 receipt by comparing the escrow contract balance before and after `transfer_from`.
 
-```cairo
-pub struct Order {
-    creator: ContractAddress,  // Address of the user who created the order
-    price: u256,               // Price of the IP in the specified token
-    token_id: u256,            // Unique identifier for the IP asset
-    fulfilled: bool,           // Whether the order has been completed
-    id: felt252,               // Unique ID for the order
-}
-```
+Seller payouts and buyer refunds are pull based. Approval creates a seller claim; expired funded cancellation creates a buyer refund claim.
 
-### Storage
+The seller can cancel an open listing before it is funded. Once funded, the buyer can cancel only after the deadline and only while the seller has not submitted fulfillment.
 
-The contract maintains the following state:
+## IP Asset Semantics
 
-- `erc20`: The ERC20 token dispatcher used for payments
-- `token_address`: The ERC20 token contract address
-- `orders`: Mapping from order_id to Order
-- `token_to_order`: Mapping from token_id to order_id
-- `order_count`: Total number of orders created
+The ERC-721 minted by this contract is a negotiation listing record, not the underlying IP asset. It is non-transferable and exists for marketplace display, indexer discovery, and protocol state anchoring.
 
-### Events
+This contract records the referenced IP asset and fulfillment proof, but it does not transfer the external IP NFT or enforce an off-chain legal license. A future adapter can wire explicit asset-transfer behavior if the protocol wants atomic settlement against a known asset standard.
 
-The contract emits the following events:
+## Non-Goals
 
-- `OrderCreated`: When a new order is created
-- `FundsDeposited`: When a buyer deposits funds for an order
-- `OrderFulfilled`: When an order is successfully fulfilled
-- `OrderCancelled`: When an order is cancelled
+- No admin, upgrade, pause, or dispute-arbitration role exists.
+- No external IP asset transfer is performed by this version.
+- No partial funding or bid ladder exists in this version.
+- No off-chain legal interpretation is performed.
+- No unilateral cancellation exists after fulfillment has been submitted.
 
-## Escrow Process Workflow
-
-1. **Order Creation**:
-   - Seller creates an order specifying the token_id and price
-   - The order is stored with a unique order_id
-
-2. **Order Retrieval**:
-   - Buyers can query orders by order_id or token_id
-
-3. **Deposit Funds**:
-   - Buyer deposits the required amount into the escrow contract
-
-4. **Fulfillment**:
-   - Seller fulfills the order, releasing the token to the buyer
-   - Funds are transferred from escrow to the seller
-
-5. **Order Finalization**:
-   - The order is marked as fulfilled
-
-## Security Mechanisms
-
-- Verification of caller identity for critical operations
-- Checks to ensure correct order state transitions
-- Validation of fund amounts
-- Prevention of duplicate orders for the same token
-
-## Installation and Setup
-
-### Prerequisites
-
-- Scarb (Cairo package manager)
-- Starknet Foundry (for testing)
-
-### Setup
-
-1. Clone the repository:
-   ```bash
-   git clone <repository-url>
-   cd mediolano-contracts/contracts/IP-Negotiation-Escrow
-   ```
-
-2. Install dependencies:
-   ```bash
-   scarb install
-   ```
-
-3. Build the contract:
-   ```bash
-   scarb build
-   ```
-
-4. Run tests:
-   ```bash
-   scarb test
-   ```
-
-## Contract Interface
+Custom SRC5 interface ID:
 
 ```cairo
-#[starknet::interface]
-pub trait IIPNegotiationEscrow<TContractState> {
-    fn create_order(
-        ref self: TContractState,
-        creator: ContractAddress,
-        price: u256,
-        token_id: u256,
-    ) -> felt252;
-    
-    fn get_order(self: @TContractState, order_id: felt252) -> Order;
-    fn get_order_by_token_id(self: @TContractState, token_id: u256) -> Order;
-    fn deposit_funds(ref self: TContractState, order_id: felt252);
-    fn fulfill_order(ref self: TContractState, order_id: felt252);
-    fn cancel_order(ref self: TContractState, order_id: felt252);
-}
+pub const IIP_NEGOTIATION_ESCROW_ID: felt252 =
+    0x0148a3c45c2f9c346979ac40c2783ef0c0d4fd028dbf7097d15a925fe601c54d;
 ```
-
-## Usage Examples
-
-### Creating an Order
-
-```cairo
-// Assuming escrow is an instance of IIPNegotiationEscrowDispatcher
-let seller = get_caller_address();
-let token_id = u256 { low: 123, high: 0 };
-let price = u256 { low: 1000000000000000000, high: 0 }; // 1 token with 18 decimals
-
-let order_id = escrow.create_order(seller, price, token_id);
-```
-
-### Depositing Funds
-
-```cairo
-// Buyer must approve the escrow contract to spend tokens first
-erc20.approve(escrow_address, price);
-
-// Then deposit funds
-escrow.deposit_funds(order_id);
-```
-
-### Fulfilling an Order
-
-```cairo
-// Only the seller can fulfill the order
-escrow.fulfill_order(order_id);
-```
-
-## Testing
-
-The contract includes comprehensive tests covering:
-
-- Order creation
-- Fund deposits
-- Order fulfillment
-- Error handling and edge cases
-
-Run tests with:
-```bash
-scarb test
-```
-
-## License
-
-This project is licensed under the MIT License - see the LICENSE file for details. 

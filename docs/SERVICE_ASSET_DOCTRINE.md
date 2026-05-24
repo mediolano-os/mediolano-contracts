@@ -1,7 +1,7 @@
 # Service Asset Doctrine
 
 **Status:** Draft contract-design doctrine for launchpad services.
-**Scope:** Mediolano and Medialane service contracts in this repository.
+**Scope:** Mediolano service contracts in this repository.
 
 ## Core Rule
 
@@ -20,7 +20,7 @@ The asset makes the service visible. Transferability defines whether the asset i
 
 ## Why This Exists
 
-Medialane indexes digital assets and displays them across creator pages, marketplace surfaces, launchpad views, SDK services, and agent workflows. If a service creates no asset, it can still be used on-chain, but it has weaker visibility and poorer composability.
+Mediolano indexes digital assets and displays them across creator pages, marketplace surfaces, launchpad views, SDK services, and agent workflows. If a service creates no asset, it can still be used on-chain, but it has weaker visibility and poorer composability.
 
 At the same time, not every service asset should be tradable. Access credentials, proofs, subscriptions, and identity-like badges can become misleading if ownership moves but access state does not.
 
@@ -64,7 +64,7 @@ Indexers and marketplace clients should treat these as different states:
 | Receipt/proof asset | Show as history/proof | Usually no |
 | No asset | Service can still be indexed by events | No asset-level marketplace surface |
 
-This keeps Medialane visible and composable without forcing every service into financialized behavior.
+This keeps Mediolano visible and composable without forcing every service into financialized behavior.
 
 ## Current Service Applications
 
@@ -91,6 +91,54 @@ The asset is valuable for visibility and access checks, but it should not be tra
 - `marketplace_visibility`: service/event visibility, not asset marketplace listing
 
 An asset-backed subscription should be a future explicit design, not an accidental property of the current record contract.
+
+### User Settings
+
+`User-Settings` stores encrypted, content-addressed settings records and mints no asset.
+
+- `asset_standard`: none
+- `asset_role`: encrypted account settings record
+- `transferability`: not applicable
+- `access_semantics`: only the settings owner can write, rotate, clear, and reveal the encrypted payload pointer
+- `marketplace_visibility`: hidden from asset marketplace surfaces; index by service events only
+
+Settings are identity-like private state. They should not become assets unless a future service explicitly defines a transferable or attestable settings object.
+
+### IP Syndication
+
+`IP-Syndication` is an ERC-1155-backed funding and participation protocol.
+
+- `asset_standard`: ERC1155
+- `asset_role`: transferable syndication share and funded participation receipt
+- `transferability`: transferable
+- `access_semantics`: shares are minted from completed funding participation; proceeds and refunds derive from escrow records
+- `marketplace_visibility`: display/index and tradable as syndication shares
+
+Syndication shares are intentionally market-facing, so transferability is part of the protocol design rather than a side effect of visibility.
+
+### IP Commission Escrow
+
+`IP-Commission-Escrow` mints a non-transferable ERC-721 offer asset for custom creative work.
+
+- `asset_standard`: ERC721
+- `asset_role`: commission offer / escrow record
+- `transferability`: non-transferable
+- `access_semantics`: creator acceptance, milestone approval, claims, and refunds derive from escrow records
+- `marketplace_visibility`: display/index as an offer asset; no default listing or resale
+
+The offer asset makes the commission visible to the marketplace without making the commissioner intent itself tradable.
+
+### IP Negotiation Escrow
+
+`IP-Negotiation-Escrow` mints a non-transferable ERC-721 listing asset for escrowed negotiation around an existing IP asset.
+
+- `asset_standard`: ERC721
+- `asset_role`: negotiation listing / escrow record
+- `transferability`: non-transferable
+- `access_semantics`: buyer funding, seller fulfillment proof, buyer approval, claims, and refunds derive from escrow records
+- `marketplace_visibility`: display/index as a negotiation listing asset; no default listing or resale
+
+The listing asset is a service record, not the underlying IP asset. External IP transfer should be introduced only through an explicit settlement adapter or specialized protocol.
 
 ## Recommended Future Pattern For IP Subscription Assets
 

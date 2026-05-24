@@ -1,274 +1,453 @@
-use core::starknet::ContractAddress;
-
-#[starknet::interface]
-pub trait IIPNegotiationEscrow<TContractState> {
-    fn create_order(
-        ref self: TContractState,
-        creator: ContractAddress,
-        price: u256,
-        token_id: u256,
-    ) -> felt252;
-    
-    fn get_order(self: @TContractState, order_id: felt252) -> Order;
-    fn get_order_by_token_id(self: @TContractState, token_id: u256) -> Order;
-    fn deposit_funds(ref self: TContractState, order_id: felt252);
-    fn fulfill_order(ref self: TContractState, order_id: felt252);
-    fn cancel_order(ref self: TContractState, order_id: felt252);
-}
-
-#[derive(Copy, Drop, Serde, starknet::Store)]
-pub struct Order {
-    creator: ContractAddress,
-    price: u256,
-    token_id: u256,
-    fulfilled: bool,
-    id: felt252,
-}
-
 #[starknet::contract]
 pub mod IPNegotiationEscrow {
+    use core::num::traits::Zero;
+    use ip_negotiation_escrow::errors::Errors;
+    use ip_negotiation_escrow::interface::{IIPNegotiationEscrow, IIP_NEGOTIATION_ESCROW_ID};
+    use ip_negotiation_escrow::types::{Negotiation, NegotiationStatus, bytearray_starts_with};
+    use openzeppelin_introspection::src5::SRC5Component;
+    use openzeppelin_token::erc20::interface::{IERC20Dispatcher, IERC20DispatcherTrait};
+    use openzeppelin_token::erc721::ERC721Component;
+    use openzeppelin_token::erc721::ERC721Component::InternalTrait as ERC721InternalTrait;
+    use openzeppelin_token::erc721::interface::IERC721Metadata;
     use starknet::storage::{
-        StorageMapReadAccess, StoragePointerReadAccess, StoragePointerWriteAccess,
-        StorageMapWriteAccess, Map,
+        Map, StoragePathEntry, StoragePointerReadAccess, StoragePointerWriteAccess,
     };
-    use starknet::{ContractAddress, get_caller_address, get_contract_address};
-    use ip_negotiation_escrow::mock_erc20::{IERC20Dispatcher, IERC20DispatcherTrait};
+    use starknet::{ContractAddress, get_block_timestamp, get_caller_address, get_contract_address};
 
-    // use openzeppelin_access::ownable::OwnableComponent;
-    // use openzeppelin_introspection::src5::SRC5Component;
+    component!(path: SRC5Component, storage: src5, event: SRC5Event);
+    component!(path: ERC721Component, storage: erc721, event: ERC721Event);
 
-    // use openzeppelin_token::erc721::extensions::ERC721EnumerableComponent;
-    // use openzeppelin_token::erc721::{
-    //     ERC721Component, interface::{IERC721Metadata, IERC721MetadataCamelOnly}
-    // };
-    
-    use super::{Order};
-    use core::pedersen::pedersen;
+    #[abi(embed_v0)]
+    impl SRC5Impl = SRC5Component::SRC5Impl<ContractState>;
+    impl SRC5InternalImpl = SRC5Component::InternalImpl<ContractState>;
+
+    #[abi(embed_v0)]
+    impl ERC721Impl = ERC721Component::ERC721Impl<ContractState>;
+    #[abi(embed_v0)]
+    impl ERC721CamelOnlyImpl = ERC721Component::ERC721CamelOnlyImpl<ContractState>;
+    impl ERC721InternalImpl = ERC721Component::InternalImpl<ContractState>;
 
     #[storage]
     struct Storage {
-        // The ERC20 token dispatcher (set during deployment)
-        erc20: IERC20Dispatcher,
-        // The ERC20 token address
-        token_address: ContractAddress,
-        // Mapping from order_id to Order
-        orders: Map<felt252, Order>,
-        // Mapping from token_id to order_id
-        token_to_order: Map<u256, felt252>,
-        // Total number of orders created (for generating unique order IDs)
-        order_count: u256,
+        #[substorage(v0)]
+        src5: SRC5Component::Storage,
+        #[substorage(v0)]
+        erc721: ERC721Component::Storage,
+        last_negotiation_id: u256,
+        negotiations: Map<u256, Negotiation>,
+        asset_to_negotiation: Map<(ContractAddress, u256), u256>,
+        token_uris: Map<u256, ByteArray>,
+        fulfillment_uris: Map<u256, ByteArray>,
+        seller_claims: Map<(u256, ContractAddress), u256>,
+        buyer_refunds: Map<(u256, ContractAddress), u256>,
+        reentrancy_locked: bool,
     }
 
     #[event]
     #[derive(Drop, starknet::Event)]
     pub enum Event {
-        OrderCreated: OrderCreated,
-        FundsDeposited: FundsDeposited,
-        OrderFulfilled: OrderFulfilled,
-        OrderCancelled: OrderCancelled,
+        #[flat]
+        SRC5Event: SRC5Component::Event,
+        #[flat]
+        ERC721Event: ERC721Component::Event,
+        ListingCreated: ListingCreated,
+        ListingFunded: ListingFunded,
+        FulfillmentSubmitted: FulfillmentSubmitted,
+        FulfillmentApproved: FulfillmentApproved,
+        ListingCancelled: ListingCancelled,
+        SellerFundsClaimed: SellerFundsClaimed,
+        BuyerRefundClaimed: BuyerRefundClaimed,
     }
 
     #[derive(Drop, starknet::Event)]
-    pub struct OrderCreated {
-        order_id: felt252,
-        creator: ContractAddress,
-        price: u256,
-        token_id: u256,
+    pub struct ListingCreated {
+        #[key]
+        pub negotiation_id: u256,
+        #[key]
+        pub seller: ContractAddress,
+        #[key]
+        pub ip_asset_contract: ContractAddress,
+        pub ip_token_id: u256,
+        pub payment_token: ContractAddress,
+        pub price: u256,
+        pub deadline: u64,
+        pub listing_uri: ByteArray,
+        pub terms_uri: ByteArray,
     }
 
     #[derive(Drop, starknet::Event)]
-    pub struct FundsDeposited {
-        order_id: felt252,
-        buyer: ContractAddress,
-        amount: u256,
+    pub struct ListingFunded {
+        #[key]
+        pub negotiation_id: u256,
+        #[key]
+        pub buyer: ContractAddress,
+        pub amount: u256,
     }
 
     #[derive(Drop, starknet::Event)]
-    pub struct OrderFulfilled {
-        order_id: felt252,
-        seller: ContractAddress,
-        buyer: ContractAddress,
-        token_id: u256,
-        price: u256,
+    pub struct FulfillmentSubmitted {
+        #[key]
+        pub negotiation_id: u256,
+        #[key]
+        pub seller: ContractAddress,
+        pub fulfillment_uri: ByteArray,
+        pub fulfillment_hash: felt252,
     }
 
     #[derive(Drop, starknet::Event)]
-    pub struct OrderCancelled {
-        order_id: felt252,
+    pub struct FulfillmentApproved {
+        #[key]
+        pub negotiation_id: u256,
+        #[key]
+        pub buyer: ContractAddress,
+        pub amount: u256,
+    }
+
+    #[derive(Drop, starknet::Event)]
+    pub struct ListingCancelled {
+        #[key]
+        pub negotiation_id: u256,
+        pub refund_amount: u256,
+    }
+
+    #[derive(Drop, starknet::Event)]
+    pub struct SellerFundsClaimed {
+        #[key]
+        pub negotiation_id: u256,
+        #[key]
+        pub seller: ContractAddress,
+        pub amount: u256,
+    }
+
+    #[derive(Drop, starknet::Event)]
+    pub struct BuyerRefundClaimed {
+        #[key]
+        pub negotiation_id: u256,
+        #[key]
+        pub buyer: ContractAddress,
+        pub amount: u256,
     }
 
     #[constructor]
-    fn constructor(ref self: ContractState, token_address: ContractAddress) {
-        self.erc20.write(IERC20Dispatcher { contract_address: token_address });
-        self.token_address.write(token_address);
-        self.order_count.write(0);
+    fn constructor(ref self: ContractState) {
+        self.erc721.initializer("Mediolano Negotiation Listing", "MNEG", "");
+        self.src5.register_interface(IIP_NEGOTIATION_ESCROW_ID);
+    }
+
+    impl ERC721HooksImpl of ERC721Component::ERC721HooksTrait<ContractState> {
+        fn before_update(
+            ref self: ERC721Component::ComponentState<ContractState>,
+            to: ContractAddress,
+            token_id: u256,
+            auth: ContractAddress,
+        ) {
+            let from = self._owner_of(token_id);
+            if !from.is_zero() && !to.is_zero() {
+                assert(false, Errors::NON_TRANSFERABLE);
+            }
+        }
     }
 
     #[abi(embed_v0)]
-    impl IPNegotiationEscrowImpl of super::IIPNegotiationEscrow<ContractState> {
-        /// Create a new order for IP negotiation
-        /// @param creator: The address of the seller who owns the IP
-        /// @param price: The price of the IP in the specified token
-        /// @param token_id: Unique identifier for the IP asset
-        /// @return order_id: A unique identifier for the order
-        fn create_order(
-            ref self: ContractState,
-            creator: ContractAddress,
-            price: u256,
-            token_id: u256,
-        ) -> felt252 {
-            // Ensure the creator is the caller
-            let caller = get_caller_address();
-            assert(caller == creator, 'Only creator can create order');
-            
-            // Check if token already has an active order
-            let existing_order_id = self.token_to_order.read(token_id);
-            if existing_order_id != 0 {
-                let existing_order = self.orders.read(existing_order_id);
-                assert(existing_order.fulfilled, 'Token already has active order');
-            }
-            
-            // Generate unique order ID using Pedersen hash
-            let count = self.order_count.read();
-            
-            // Calculate a unique order ID by chaining Pedersen hashes
-            let hash1 = pedersen(token_id.low.into(), token_id.high.into());
-            let hash2 = pedersen(hash1, count.low.into());
-            let hash3 = pedersen(hash2, count.high.into());
-            let order_id = pedersen(hash3, creator.into());
-            
-            // Create new order
-            let order = Order {
-                creator,
-                price,
-                token_id,
-                fulfilled: false,
-                id: order_id,
-            };
-            
-            // Store order in mappings
-            self.orders.write(order_id, order);
-            self.token_to_order.write(token_id, order_id);
-            
-            // Increment order count
-            self.order_count.write(count + 1);
-            
-            // Emit event
-            self.emit(
-                OrderCreated {
-                    order_id,
-                    creator,
-                    price,
-                    token_id,
-                }
-            );
-            
-            order_id
+    impl ERC721MetadataImpl of IERC721Metadata<ContractState> {
+        fn name(self: @ContractState) -> ByteArray {
+            "Mediolano Negotiation Listing"
         }
-        
-        /// Get order details by order ID
-        /// @param order_id: The unique identifier of the order
-        /// @return Order: The order details
-        fn get_order(self: @ContractState, order_id: felt252) -> Order {
-            let order = self.orders.read(order_id);
-            assert(order.id == order_id, 'Order does not exist');
-            order
+
+        fn symbol(self: @ContractState) -> ByteArray {
+            "MNEG"
         }
-        
-        /// Get order details by token ID
-        /// @param token_id: The unique identifier of the token
-        /// @return Order: The order details
-        fn get_order_by_token_id(self: @ContractState, token_id: u256) -> Order {
-            let order_id = self.token_to_order.read(token_id);
-            assert(order_id != 0, 'No order for this token');
-            self.orders.read(order_id)
-        }
-        
-        /// Deposit funds for an order
-        /// @param order_id: The unique identifier of the order
-        fn deposit_funds(ref self: ContractState, order_id: felt252) {
-            let order = self.orders.read(order_id);
-            assert(order.id == order_id, 'Order does not exist');
-            assert(!order.fulfilled, 'Order already fulfilled');
-            
-            let buyer = get_caller_address();
-            assert(buyer != order.creator, 'Creator cannot buy own IP');
-            
-            // Check buyer has sufficient balance
-            let buyer_balance = self.erc20.read().balance_of(buyer);
-            assert(buyer_balance >= order.price, 'Insufficient balance');
-            
-            // Transfer tokens from buyer to contract
-            let dispatcher = IERC20Dispatcher { contract_address: self.token_address.read() };
-            let result = dispatcher.transfer_from(buyer, get_contract_address(), order.price);
-            assert(result, 'ERC20 transfer failed');
-            
-            // Emit event
-            self.emit(
-                FundsDeposited {
-                    order_id,
-                    buyer,
-                    amount: order.price,
-                }
-            );
-        }
-        
-        /// Fulfill an order after funds have been deposited
-        /// @param order_id: The unique identifier of the order
-        fn fulfill_order(ref self: ContractState, order_id: felt252) {
-            let mut order = self.orders.read(order_id);
-            assert(order.id == order_id, 'Order does not exist');
-            assert(!order.fulfilled, 'Order already fulfilled');
-            
-            // Only the creator (seller) can fulfill the order
-            let caller = get_caller_address();
-            assert(caller == order.creator, 'Only creator can fulfill order');
-            
-            // Transfer tokens to the seller
-            let dispatcher = IERC20Dispatcher { contract_address: self.token_address.read() };
-            let result = dispatcher.transfer(order.creator, order.price);
-            assert(result, 'ERC20 transfer failed');
-            
-            // Mark order as fulfilled
-            order.fulfilled = true;
-            self.orders.write(order_id, order);
-            
-            // Emit event
-            // Note: In practice, we would also need to handle the actual transfer of the token,
-            // which might be done through a separate NFT contract
-            self.emit(
-                OrderFulfilled {
-                    order_id,
-                    seller: order.creator,
-                    buyer: caller, // This would normally be the buyer's address
-                    token_id: order.token_id,
-                    price: order.price,
-                }
-            );
-        }
-        
-        /// Cancel an order
-        /// @param order_id: The unique identifier of the order
-        fn cancel_order(ref self: ContractState, order_id: felt252) {
-            let order = self.orders.read(order_id);
-            assert(order.id == order_id, 'Order does not exist');
-            assert(!order.fulfilled, 'Order already fulfilled');
-            
-            // Only the creator can cancel the order
-            let caller = get_caller_address();
-            assert(caller == order.creator, 'Only creator can cancel order');
-            
-            // Mark order as fulfilled (effectively cancelling it)
-            let mut updated_order = order;
-            updated_order.fulfilled = true;
-            self.orders.write(order_id, updated_order);
-            
-            // Emit event
-            self.emit(
-                OrderCancelled {
-                    order_id,
-                }
-            );
+
+        fn token_uri(self: @ContractState, token_id: u256) -> ByteArray {
+            self.token_uris.entry(token_id).read()
         }
     }
-} 
+
+    #[abi(embed_v0)]
+    pub impl NegotiationEscrowImpl of IIPNegotiationEscrow<ContractState> {
+        fn create_listing(
+            ref self: ContractState,
+            ip_asset_contract: ContractAddress,
+            ip_token_id: u256,
+            payment_token: ContractAddress,
+            price: u256,
+            listing_uri: ByteArray,
+            listing_hash: felt252,
+            terms_uri: ByteArray,
+            terms_hash: felt252,
+            deadline: u64,
+        ) -> u256 {
+            let seller = get_caller_address();
+            assert(!seller.is_zero(), Errors::NOT_SELLER);
+            assert(!ip_asset_contract.is_zero(), Errors::INVALID_ASSET);
+            assert(!payment_token.is_zero(), Errors::INVALID_PAYMENT_TOKEN);
+            assert(price > 0, Errors::PRICE_IS_ZERO);
+            assert(listing_hash != 0, Errors::INVALID_HASH);
+            assert(terms_hash != 0, Errors::INVALID_HASH);
+            assert_content_addressed(@listing_uri);
+            assert_content_addressed(@terms_uri);
+            assert(deadline > get_block_timestamp(), Errors::DEADLINE_EXPIRED);
+
+            let asset_key = (ip_asset_contract, ip_token_id);
+            let existing_id = self.asset_to_negotiation.entry(asset_key).read();
+            if existing_id != 0 {
+                let existing = self.negotiations.entry(existing_id).read();
+                let active = existing.status == NegotiationStatus::Open
+                    || existing.status == NegotiationStatus::Funded
+                    || existing.status == NegotiationStatus::FulfillmentSubmitted;
+                assert(!existing.exists || !active, Errors::ACTIVE_LISTING_EXISTS);
+            }
+
+            let negotiation_id = self.last_negotiation_id.read() + 1;
+            let negotiation = Negotiation {
+                negotiation_id,
+                seller,
+                buyer: Zero::zero(),
+                ip_asset_contract,
+                ip_token_id,
+                payment_token,
+                price,
+                escrowed_amount: 0,
+                released_amount: 0,
+                refunded_amount: 0,
+                deadline,
+                status: NegotiationStatus::Open,
+                listing_uri: listing_uri.clone(),
+                listing_hash,
+                terms_uri: terms_uri.clone(),
+                terms_hash,
+                fulfillment_hash: 0,
+                exists: true,
+            };
+
+            self.negotiations.entry(negotiation_id).write(negotiation);
+            self.asset_to_negotiation.entry(asset_key).write(negotiation_id);
+            self.token_uris.entry(negotiation_id).write(listing_uri.clone());
+            self.last_negotiation_id.write(negotiation_id);
+            self.erc721.mint(seller, negotiation_id);
+
+            self
+                .emit(
+                    ListingCreated {
+                        negotiation_id,
+                        seller,
+                        ip_asset_contract,
+                        ip_token_id,
+                        payment_token,
+                        price,
+                        deadline,
+                        listing_uri,
+                        terms_uri,
+                    },
+                );
+
+            negotiation_id
+        }
+
+        fn fund_listing(ref self: ContractState, negotiation_id: u256) -> u256 {
+            self.enter_non_reentrant();
+            let buyer = get_caller_address();
+            let mut negotiation = self.get_existing_negotiation(negotiation_id);
+            assert(negotiation.status == NegotiationStatus::Open, Errors::INVALID_STATUS);
+            self.assert_before_deadline(negotiation.deadline);
+            assert(buyer != negotiation.seller, Errors::INVALID_BUYER);
+
+            let token = IERC20Dispatcher { contract_address: negotiation.payment_token };
+            let contract_address = get_contract_address();
+            let balance_before = token.balance_of(contract_address);
+            let success = token.transfer_from(buyer, contract_address, negotiation.price);
+            assert(success, Errors::PAYMENT_FAILED);
+            let balance_after = token.balance_of(contract_address);
+            assert(balance_after - balance_before == negotiation.price, Errors::PAYMENT_FAILED);
+
+            negotiation.buyer = buyer;
+            negotiation.escrowed_amount = negotiation.price;
+            negotiation.status = NegotiationStatus::Funded;
+            let funded_amount = negotiation.price;
+            self.negotiations.entry(negotiation_id).write(negotiation);
+            self.exit_non_reentrant();
+
+            self.emit(ListingFunded { negotiation_id, buyer, amount: funded_amount });
+            funded_amount
+        }
+
+        fn submit_fulfillment(
+            ref self: ContractState,
+            negotiation_id: u256,
+            fulfillment_uri: ByteArray,
+            fulfillment_hash: felt252,
+        ) {
+            let caller = get_caller_address();
+            let mut negotiation = self.get_existing_negotiation(negotiation_id);
+            assert(caller == negotiation.seller, Errors::NOT_SELLER);
+            assert(negotiation.status == NegotiationStatus::Funded, Errors::INVALID_STATUS);
+            self.assert_before_deadline(negotiation.deadline);
+            assert(fulfillment_hash != 0, Errors::INVALID_HASH);
+            assert_content_addressed(@fulfillment_uri);
+
+            negotiation.status = NegotiationStatus::FulfillmentSubmitted;
+            negotiation.fulfillment_hash = fulfillment_hash;
+            self.negotiations.entry(negotiation_id).write(negotiation);
+            self.fulfillment_uris.entry(negotiation_id).write(fulfillment_uri.clone());
+
+            self
+                .emit(
+                    FulfillmentSubmitted {
+                        negotiation_id, seller: caller, fulfillment_uri, fulfillment_hash,
+                    },
+                );
+        }
+
+        fn approve_fulfillment(ref self: ContractState, negotiation_id: u256) {
+            let caller = get_caller_address();
+            let mut negotiation = self.get_existing_negotiation(negotiation_id);
+            assert(caller == negotiation.buyer, Errors::NOT_BUYER);
+            assert(
+                negotiation.status == NegotiationStatus::FulfillmentSubmitted,
+                Errors::INVALID_STATUS,
+            );
+
+            negotiation.status = NegotiationStatus::Completed;
+            negotiation.released_amount = negotiation.price;
+            let key = (negotiation_id, negotiation.seller);
+            let claim = self.seller_claims.entry(key).read() + negotiation.price;
+            self.seller_claims.entry(key).write(claim);
+            let approved_amount = negotiation.price;
+            self.negotiations.entry(negotiation_id).write(negotiation);
+
+            self
+                .emit(
+                    FulfillmentApproved { negotiation_id, buyer: caller, amount: approved_amount },
+                );
+        }
+
+        fn cancel_listing(ref self: ContractState, negotiation_id: u256) {
+            let caller = get_caller_address();
+            let mut negotiation = self.get_existing_negotiation(negotiation_id);
+            let seller_can_cancel_open = caller == negotiation.seller
+                && negotiation.status == NegotiationStatus::Open;
+            let buyer_can_cancel_expired = caller == negotiation.buyer
+                && negotiation.status == NegotiationStatus::Funded
+                && get_block_timestamp() > negotiation.deadline;
+            assert(seller_can_cancel_open || buyer_can_cancel_expired, Errors::INVALID_STATUS);
+
+            let refund_amount = if buyer_can_cancel_expired {
+                negotiation.escrowed_amount - negotiation.refunded_amount
+            } else {
+                0
+            };
+            negotiation.status = NegotiationStatus::Cancelled;
+            negotiation.refunded_amount += refund_amount;
+            let buyer = negotiation.buyer;
+            self.negotiations.entry(negotiation_id).write(negotiation);
+            if refund_amount > 0 {
+                let key = (negotiation_id, buyer);
+                let refund = self.buyer_refunds.entry(key).read() + refund_amount;
+                self.buyer_refunds.entry(key).write(refund);
+            }
+
+            self.emit(ListingCancelled { negotiation_id, refund_amount });
+        }
+
+        fn claim_seller_funds(ref self: ContractState, negotiation_id: u256) -> u256 {
+            self.enter_non_reentrant();
+            let caller = get_caller_address();
+            let negotiation = self.get_existing_negotiation(negotiation_id);
+            assert(caller == negotiation.seller, Errors::NOT_SELLER);
+            let key = (negotiation_id, caller);
+            let amount = self.seller_claims.entry(key).read();
+            assert(amount > 0, Errors::NOTHING_TO_CLAIM);
+            self.seller_claims.entry(key).write(0);
+
+            let token = IERC20Dispatcher { contract_address: negotiation.payment_token };
+            let success = token.transfer(caller, amount);
+            assert(success, Errors::PAYMENT_FAILED);
+            self.exit_non_reentrant();
+
+            self.emit(SellerFundsClaimed { negotiation_id, seller: caller, amount });
+            amount
+        }
+
+        fn claim_buyer_refund(ref self: ContractState, negotiation_id: u256) -> u256 {
+            self.enter_non_reentrant();
+            let caller = get_caller_address();
+            let negotiation = self.get_existing_negotiation(negotiation_id);
+            assert(caller == negotiation.buyer, Errors::NOT_BUYER);
+            let key = (negotiation_id, caller);
+            let amount = self.buyer_refunds.entry(key).read();
+            assert(amount > 0, Errors::NOTHING_TO_CLAIM);
+            self.buyer_refunds.entry(key).write(0);
+
+            let token = IERC20Dispatcher { contract_address: negotiation.payment_token };
+            let success = token.transfer(caller, amount);
+            assert(success, Errors::PAYMENT_FAILED);
+            self.exit_non_reentrant();
+
+            self.emit(BuyerRefundClaimed { negotiation_id, buyer: caller, amount });
+            amount
+        }
+
+        fn get_negotiation(self: @ContractState, negotiation_id: u256) -> Negotiation {
+            self.get_existing_negotiation(negotiation_id)
+        }
+
+        fn get_negotiation_by_asset(
+            self: @ContractState, ip_asset_contract: ContractAddress, ip_token_id: u256,
+        ) -> Negotiation {
+            let negotiation_id = self
+                .asset_to_negotiation
+                .entry((ip_asset_contract, ip_token_id))
+                .read();
+            self.get_existing_negotiation(negotiation_id)
+        }
+
+        fn get_fulfillment_uri(self: @ContractState, negotiation_id: u256) -> ByteArray {
+            self.get_existing_negotiation(negotiation_id);
+            self.fulfillment_uris.entry(negotiation_id).read()
+        }
+
+        fn get_claimable_seller_funds(
+            self: @ContractState, negotiation_id: u256, seller: ContractAddress,
+        ) -> u256 {
+            self.seller_claims.entry((negotiation_id, seller)).read()
+        }
+
+        fn get_claimable_buyer_refund(
+            self: @ContractState, negotiation_id: u256, buyer: ContractAddress,
+        ) -> u256 {
+            self.buyer_refunds.entry((negotiation_id, buyer)).read()
+        }
+
+        fn get_last_negotiation_id(self: @ContractState) -> u256 {
+            self.last_negotiation_id.read()
+        }
+    }
+
+    #[generate_trait]
+    impl InternalImpl of InternalTrait {
+        fn get_existing_negotiation(self: @ContractState, negotiation_id: u256) -> Negotiation {
+            let negotiation = self.negotiations.entry(negotiation_id).read();
+            assert(negotiation.exists, Errors::NEGOTIATION_NOT_FOUND);
+            negotiation
+        }
+
+        fn enter_non_reentrant(ref self: ContractState) {
+            assert(!self.reentrancy_locked.read(), Errors::REENTRANT_CALL);
+            self.reentrancy_locked.write(true);
+        }
+
+        fn exit_non_reentrant(ref self: ContractState) {
+            self.reentrancy_locked.write(false);
+        }
+
+        fn assert_before_deadline(self: @ContractState, deadline: u64) {
+            assert(get_block_timestamp() <= deadline, Errors::DEADLINE_EXPIRED);
+        }
+    }
+
+    fn assert_content_addressed(uri: @ByteArray) {
+        let valid_uri = bytearray_starts_with(uri, @"ipfs://")
+            || bytearray_starts_with(uri, @"ar://");
+        assert(valid_uri, Errors::INVALID_URI);
+    }
+}

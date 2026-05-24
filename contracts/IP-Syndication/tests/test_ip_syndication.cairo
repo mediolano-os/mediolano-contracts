@@ -1,1022 +1,635 @@
-use ip_syndication::errors::Errors;
-use ip_syndication::interface::{IIPSyndicationDispatcher, IIPSyndicationDispatcherTrait};
-use ip_syndication::types::{IPMetadata, SyndicationDetails, Status, Mode, ParticipantDetails};
-use openzeppelin::token::erc1155::interface::{IERC1155Dispatcher, IERC1155DispatcherTrait};
-use openzeppelin::token::erc20::interface::{IERC20Dispatcher, IERC20DispatcherTrait};
-
-use snforge_std::{
-    EventSpyAssertionsTrait, spy_events, start_cheat_caller_address, stop_cheat_caller_address,
-    cheat_caller_address, stop_cheat_caller_address_global
+use ip_syndication::interface::{
+    IIPSyndicationDispatcher, IIPSyndicationDispatcherTrait, IIP_SYNDICATION_ID,
 };
-use starknet::{ContractAddress, contract_address_const};
-use super::test_utils::{setup, BOB, OWNER, ALICE};
+use ip_syndication::mock::erc20::{IERC20MintDispatcher, IERC20MintDispatcherTrait};
+use ip_syndication::mock::malicious_erc20::{
+    IMaliciousERC20ConfigDispatcher, IMaliciousERC20ConfigDispatcherTrait,
+};
+use ip_syndication::mock::reentrant_erc1155_receiver::{
+    IReentrantERC1155ReceiverConfigDispatcher, IReentrantERC1155ReceiverConfigDispatcherTrait,
+};
+use ip_syndication::types::{Mode, Status};
+use openzeppelin_introspection::interface::{ISRC5Dispatcher, ISRC5DispatcherTrait};
+use openzeppelin_token::erc1155::interface::{
+    IERC1155Dispatcher, IERC1155DispatcherTrait, IERC1155MetadataURIDispatcher,
+    IERC1155MetadataURIDispatcherTrait,
+};
+use openzeppelin_token::erc20::interface::{IERC20Dispatcher, IERC20DispatcherTrait};
+use snforge_std::{CheatSpan, ContractClassTrait, DeclareResultTrait, cheat_caller_address, declare};
+use starknet::ContractAddress;
 
-#[test]
-#[should_panic(expected: ('Price can not be zero',))]
-fn test_register_ip_price_is_zero() {
-    // Setup test environment
-    let (ip_syndication, asset_nft, erc20, _) = setup();
-    let description: ByteArray = "description";
-    let uri: ByteArray = "flawless/";
+fn OWNER() -> ContractAddress {
+    0x101.try_into().unwrap()
+}
 
-    // Try to register with zero price (should fail)
-    ip_syndication
+fn CREATOR() -> ContractAddress {
+    0x102.try_into().unwrap()
+}
+
+fn ALICE() -> ContractAddress {
+    0x103.try_into().unwrap()
+}
+
+fn BOB() -> ContractAddress {
+    0x104.try_into().unwrap()
+}
+
+fn ZERO() -> ContractAddress {
+    0.try_into().unwrap()
+}
+
+fn IPFS_URI() -> ByteArray {
+    "ipfs://bafybeisyndication"
+}
+
+fn AR_URI() -> ByteArray {
+    "ar://syndication"
+}
+
+fn HTTP_URI() -> ByteArray {
+    "https://example.com/syndication.json"
+}
+
+fn ATTACK_DEPOSIT() -> u8 {
+    1
+}
+
+fn ATTACK_REFUND() -> u8 {
+    2
+}
+
+fn ATTACK_PROCEEDS() -> u8 {
+    3
+}
+
+fn SHORT_TRANSFER_FROM() -> u8 {
+    4
+}
+
+fn deploy_syndication() -> IIPSyndicationDispatcher {
+    let contract = declare("IPSyndication").unwrap().contract_class();
+    let calldata = array![];
+    let (contract_address, _) = contract.deploy(@calldata).unwrap();
+    IIPSyndicationDispatcher { contract_address }
+}
+
+fn deploy_erc20() -> IERC20Dispatcher {
+    let contract = declare("MockERC20").unwrap().contract_class();
+    let mut calldata = array![];
+    let name: ByteArray = "Mock Token";
+    let symbol: ByteArray = "MOCK";
+    let supply: u256 = 0;
+    name.serialize(ref calldata);
+    symbol.serialize(ref calldata);
+    supply.serialize(ref calldata);
+    let (contract_address, _) = contract.deploy(@calldata).unwrap();
+    IERC20Dispatcher { contract_address }
+}
+
+fn deploy_malicious_erc20() -> IERC20Dispatcher {
+    let contract = declare("MaliciousERC20").unwrap().contract_class();
+    let mut calldata = array![];
+    let name: ByteArray = "Malicious Token";
+    let symbol: ByteArray = "MAL";
+    let supply: u256 = 0;
+    name.serialize(ref calldata);
+    symbol.serialize(ref calldata);
+    supply.serialize(ref calldata);
+    let (contract_address, _) = contract.deploy(@calldata).unwrap();
+    IERC20Dispatcher { contract_address }
+}
+
+fn deploy_receiver() -> ContractAddress {
+    let contract = declare("MockERC1155Receiver").unwrap().contract_class();
+    let calldata = array![];
+    let (contract_address, _) = contract.deploy(@calldata).unwrap();
+    contract_address
+}
+
+fn deploy_reentrant_receiver() -> ContractAddress {
+    let contract = declare("ReentrantERC1155Receiver").unwrap().contract_class();
+    let calldata = array![];
+    let (contract_address, _) = contract.deploy(@calldata).unwrap();
+    contract_address
+}
+
+fn configure_malicious_erc20(
+    token: IERC20Dispatcher, syndication: IIPSyndicationDispatcher, ip_id: u256, mode: u8,
+) {
+    IMaliciousERC20ConfigDispatcher { contract_address: token.contract_address }
+        .configure_attack(syndication.contract_address, ip_id, mode, 1);
+}
+
+fn configure_reentrant_receiver(
+    receiver: ContractAddress, syndication: IIPSyndicationDispatcher, ip_id: u256,
+) {
+    IReentrantERC1155ReceiverConfigDispatcher { contract_address: receiver }
+        .configure_reentrant_mint(syndication.contract_address, ip_id);
+}
+
+fn mint_erc20(token: ContractAddress, recipient: ContractAddress, amount: u256) {
+    IERC20MintDispatcher { contract_address: token }.mint(recipient, amount);
+}
+
+fn approve(token: IERC20Dispatcher, owner: ContractAddress, spender: ContractAddress) {
+    cheat_caller_address(token.contract_address, owner, CheatSpan::TargetCalls(1));
+    token.approve(spender, 1000000);
+}
+
+fn setup() -> (IIPSyndicationDispatcher, IERC20Dispatcher) {
+    let syndication = deploy_syndication();
+    let token = deploy_erc20();
+    mint_erc20(token.contract_address, ALICE(), 1000000);
+    mint_erc20(token.contract_address, BOB(), 1000000);
+    mint_erc20(token.contract_address, OWNER(), 1000000);
+    approve(token, ALICE(), syndication.contract_address);
+    approve(token, BOB(), syndication.contract_address);
+    approve(token, OWNER(), syndication.contract_address);
+    (syndication, token)
+}
+
+fn register_public(
+    syndication: IIPSyndicationDispatcher, token: IERC20Dispatcher, target: u256,
+) -> u256 {
+    cheat_caller_address(syndication.contract_address, CREATOR(), CheatSpan::TargetCalls(1));
+    syndication
         .register_ip(
-            0,
-            'flawless'.into(),
-            description,
-            uri,
-            'Exclusive license',
+            target,
+            'syndicated_ip',
+            "description",
+            IPFS_URI(),
+            'license_terms',
             Mode::Public,
-            erc20.contract_address
+            token.contract_address,
+        )
+}
+
+fn activate(syndication: IIPSyndicationDispatcher, ip_id: u256) {
+    cheat_caller_address(syndication.contract_address, CREATOR(), CheatSpan::TargetCalls(1));
+    syndication.activate_syndication(ip_id);
+}
+
+#[test]
+fn test_register_ip_success() {
+    let (syndication, token) = setup();
+
+    let ip_id = register_public(syndication, token, 1000);
+
+    assert(ip_id == 1, 'ip id should be one');
+    assert(syndication.get_last_ip_id() == 1, 'last id should match');
+
+    let metadata = syndication.get_ip_metadata(ip_id);
+    assert(metadata.owner == CREATOR(), 'owner should match');
+    assert(metadata.target_amount == 1000, 'target should match');
+    assert(metadata.metadata_uri == IPFS_URI(), 'uri should match');
+    assert(metadata.token_id == ip_id, 'token id should match');
+    assert(metadata.exists, 'metadata should exist');
+
+    let details = syndication.get_syndication_details(ip_id);
+    assert(details.status == Status::Pending, 'status should be pending');
+    assert(details.mode == Mode::Public, 'mode should be public');
+    assert(details.payment_token == token.contract_address, 'token should match');
+}
+
+#[test]
+fn test_register_accepts_ar_uri() {
+    let (syndication, token) = setup();
+
+    cheat_caller_address(syndication.contract_address, CREATOR(), CheatSpan::TargetCalls(1));
+    let ip_id = syndication
+        .register_ip(
+            1000, 'ip', "description", AR_URI(), 'terms', Mode::Public, token.contract_address,
+        );
+
+    assert(syndication.get_ip_metadata(ip_id).metadata_uri == AR_URI(), 'ar uri should match');
+}
+
+#[test]
+#[should_panic(expected: 'Target is zero')]
+fn test_register_rejects_zero_target() {
+    let (syndication, token) = setup();
+
+    cheat_caller_address(syndication.contract_address, CREATOR(), CheatSpan::TargetCalls(1));
+    syndication
+        .register_ip(
+            0, 'ip', "description", IPFS_URI(), 'terms', Mode::Public, token.contract_address,
         );
 }
 
 #[test]
-#[should_panic(expected: ('Invalid currency address',))]
-fn test_register_ip_price_invalid_currency_address() {
-    // Setup test environment
-    let (ip_syndication, asset_nft, erc20, _) = setup();
-    let description: ByteArray = "description";
-    let uri: ByteArray = "flawless/";
+#[should_panic(expected: 'Invalid payment token')]
+fn test_register_rejects_zero_payment_token() {
+    let (syndication, _) = setup();
 
-    // Try to register with zero currency address (should fail)
-    ip_syndication
+    cheat_caller_address(syndication.contract_address, CREATOR(), CheatSpan::TargetCalls(1));
+    syndication.register_ip(1000, 'ip', "description", IPFS_URI(), 'terms', Mode::Public, ZERO());
+}
+
+#[test]
+#[should_panic(expected: 'URI must be ipfs:// or ar://')]
+fn test_register_rejects_http_uri() {
+    let (syndication, token) = setup();
+
+    cheat_caller_address(syndication.contract_address, CREATOR(), CheatSpan::TargetCalls(1));
+    syndication
         .register_ip(
-            100,
-            'flawless'.into(),
-            description,
-            uri,
-            'Exclusive license',
-            Mode::Public,
-            contract_address_const::<0>()
+            1000, 'ip', "description", HTTP_URI(), 'terms', Mode::Public, token.contract_address,
         );
 }
 
 #[test]
-fn test_register_ip_price_ok() {
-    // Setup test environment
-    let (ip_syndication, asset_nft, erc20, _) = setup();
-    let description: ByteArray = "description";
-    let uri: ByteArray = "flawless/";
-    let price = 100_u256;
-    let name = 'flawless';
-    let licensing_terms = 'Exclusive license';
+fn test_activate_syndication() {
+    let (syndication, token) = setup();
+    let ip_id = register_public(syndication, token, 1000);
 
-    // Register IP as BOB
-    start_cheat_caller_address(ip_syndication.contract_address, BOB());
-    let ip_id = ip_syndication
-        .register_ip(
-            price,
-            name,
-            description.clone(),
-            uri.clone(),
-            licensing_terms,
-            Mode::Public,
-            erc20.contract_address
-        );
-    stop_cheat_caller_address(ip_syndication.contract_address);
+    activate(syndication, ip_id);
 
-    // Verify IP metadata
-    let ip_metadata = ip_syndication.get_ip_metadata(ip_id);
-
-    assert(ip_metadata.ip_id == ip_id, 'wrong ip ID');
-    assert(ip_metadata.owner == BOB(), 'wrong ip owner');
-    assert(ip_metadata.price == price, 'wrong ip price');
-    assert(ip_metadata.description == description, 'wrong ip description');
-    assert(ip_metadata.uri == uri, 'wrong ip uri');
-    assert(ip_metadata.licensing_terms == licensing_terms, 'wrong ip licensing terms');
-    assert(ip_metadata.token_id == ip_id, 'wrong ip token id');
-
-    // Verify syndication details
-    let syndication_details = ip_syndication.get_syndication_details(ip_id);
-
-    assert(syndication_details.ip_id == ip_id, 'wrong ip_id');
-    assert(syndication_details.mode == Mode::Public, 'wrong mode');
-    assert(syndication_details.status == Status::Pending, 'wrong status');
-    assert(syndication_details.total_raised == 0, 'wrong total amount raised');
-    assert(syndication_details.participant_count == 0, 'wrong participant count');
-    assert(
-        syndication_details.currency_address == erc20.contract_address, 'wrong participant count'
-    );
+    assert(syndication.get_syndication_status(ip_id) == Status::Active, 'status should active');
 }
 
 #[test]
-#[should_panic(expected: ('Not IP owner',))]
-fn test_activate_syndication_not_ip_owner() {
-    // Setup test environment and register IP
-    let (ip_syndication, asset_nft, erc20, _) = setup();
-    let description: ByteArray = "description";
-    let uri: ByteArray = "flawless/";
-    let price = 100_u256;
-    let name = 'flawless';
-    let licensing_terms = 'Exclusive license';
+#[should_panic(expected: 'Not IP owner')]
+fn test_activate_rejects_non_owner() {
+    let (syndication, token) = setup();
+    let ip_id = register_public(syndication, token, 1000);
 
-    start_cheat_caller_address(ip_syndication.contract_address, BOB());
-    let ip_id = ip_syndication
-        .register_ip(
-            price,
-            name,
-            description.clone(),
-            uri.clone(),
-            licensing_terms,
-            Mode::Public,
-            erc20.contract_address
-        );
-    stop_cheat_caller_address(ip_syndication.contract_address);
-
-    // Verify initial status is Pending
-    let syndication_details = ip_syndication.get_syndication_details(ip_id);
-    assert(syndication_details.status == Status::Pending, 'wrong status');
-
-    // Try to activate as non-owner (default caller, not BOB) - should fail
-    ip_syndication.activate_syndication(ip_id);
+    cheat_caller_address(syndication.contract_address, ALICE(), CheatSpan::TargetCalls(1));
+    syndication.activate_syndication(ip_id);
 }
 
 #[test]
-fn test_activate_syndication_ok() {
-    // Setup test environment and register IP
-    let (ip_syndication, asset_nft, erc20, _) = setup();
-    let description: ByteArray = "description";
-    let uri: ByteArray = "flawless/";
-    let price = 100_u256;
-    let name = 'flawless';
-    let licensing_terms = 'Exclusive license';
+fn test_deposit_public_mode() {
+    let (syndication, token) = setup();
+    let ip_id = register_public(syndication, token, 1000);
+    activate(syndication, ip_id);
 
-    start_cheat_caller_address(ip_syndication.contract_address, BOB());
-    let ip_id = ip_syndication
-        .register_ip(
-            price,
-            name,
-            description.clone(),
-            uri.clone(),
-            licensing_terms,
-            Mode::Public,
-            erc20.contract_address
-        );
-    stop_cheat_caller_address(ip_syndication.contract_address);
+    let alice_before = token.balance_of(ALICE());
+    cheat_caller_address(syndication.contract_address, ALICE(), CheatSpan::TargetCalls(1));
+    let deposited = syndication.deposit(ip_id, 300);
 
-    // Verify initial status is Pending
-    let syndication_details = ip_syndication.get_syndication_details(ip_id);
-    assert(syndication_details.status == Status::Pending, 'wrong status');
+    assert(deposited == 300, 'deposit amount should match');
+    assert(token.balance_of(ALICE()) == alice_before - 300, 'alice balance');
+    assert(token.balance_of(syndication.contract_address) == 300, 'contract balance');
+    assert(syndication.get_participant_count(ip_id) == 1, 'participant count');
 
-    // Activate as BOB (owner)
-    start_cheat_caller_address(ip_syndication.contract_address, BOB());
-    ip_syndication.activate_syndication(ip_id);
-    stop_cheat_caller_address(ip_syndication.contract_address);
-
-    // Verify status is now Active
-    let syndication_details = ip_syndication.get_syndication_details(ip_id);
-    assert(syndication_details.status == Status::Active, 'wrong status');
+    let participant = syndication.get_participant_details(ip_id, ALICE());
+    assert(participant.amount_deposited == 300, 'amount deposited');
+    assert(participant.share == 300, 'share should match');
 }
 
 #[test]
-#[should_panic(expected: ('Syndication is active',))]
-fn test_activate_syndication_when_active() {
-    // Setup test environment and register IP
-    let (ip_syndication, asset_nft, erc20, _) = setup();
-    let description: ByteArray = "description";
-    let uri: ByteArray = "flawless/";
-    let price = 100_u256;
-    let name = 'flawless';
-    let licensing_terms = 'Exclusive license';
+fn test_deposit_caps_to_remaining_amount() {
+    let (syndication, token) = setup();
+    let ip_id = register_public(syndication, token, 1000);
+    activate(syndication, ip_id);
 
-    start_cheat_caller_address(ip_syndication.contract_address, BOB());
-    let ip_id = ip_syndication
-        .register_ip(
-            price,
-            name,
-            description.clone(),
-            uri.clone(),
-            licensing_terms,
-            Mode::Public,
-            erc20.contract_address
-        );
-    stop_cheat_caller_address(ip_syndication.contract_address);
+    cheat_caller_address(syndication.contract_address, ALICE(), CheatSpan::TargetCalls(1));
+    syndication.deposit(ip_id, 700);
 
-    // Verify initial status is Pending
-    let syndication_details = ip_syndication.get_syndication_details(ip_id);
-    assert(syndication_details.status == Status::Pending, 'wrong status');
+    cheat_caller_address(syndication.contract_address, BOB(), CheatSpan::TargetCalls(1));
+    let deposited = syndication.deposit(ip_id, 1000);
 
-    // Activate as BOB (owner)
-    start_cheat_caller_address(ip_syndication.contract_address, BOB());
-    ip_syndication.activate_syndication(ip_id);
-
-    // Verify status is now Active
-    let syndication_details = ip_syndication.get_syndication_details(ip_id);
-    assert(syndication_details.status == Status::Active, 'wrong status');
-
-    // Try to activate again (should fail)
-    ip_syndication.activate_syndication(ip_id);
-    stop_cheat_caller_address(ip_syndication.contract_address);
+    assert(deposited == 300, 'should cap deposit');
+    assert(syndication.get_syndication_status(ip_id) == Status::Completed, 'completed');
+    assert(syndication.get_syndication_details(ip_id).total_raised == 1000, 'total raised');
 }
 
 #[test]
-#[should_panic(expected: ('Syndication not active',))]
-fn test_deposit_non_active() {
-    // Setup test environment and register IP
-    let (ip_syndication, asset_nft, erc20, _) = setup();
-    let description: ByteArray = "description";
-    let uri: ByteArray = "flawless/";
-    let price = 100_u256;
-    let name = 'flawless';
-    let licensing_terms = 'Exclusive license';
+fn test_get_participants_paginates_results() {
+    let (syndication, token) = setup();
+    let ip_id = register_public(syndication, token, 1000);
+    activate(syndication, ip_id);
 
-    start_cheat_caller_address(ip_syndication.contract_address, BOB());
-    let ip_id = ip_syndication
-        .register_ip(
-            price,
-            name,
-            description.clone(),
-            uri.clone(),
-            licensing_terms,
-            Mode::Public,
-            erc20.contract_address
-        );
-    stop_cheat_caller_address(ip_syndication.contract_address);
+    cheat_caller_address(syndication.contract_address, ALICE(), CheatSpan::TargetCalls(1));
+    syndication.deposit(ip_id, 300);
+    cheat_caller_address(syndication.contract_address, BOB(), CheatSpan::TargetCalls(1));
+    syndication.deposit(ip_id, 300);
 
-    // Try to deposit while syndication is still Pending (should fail)
-    ip_syndication.deposit(ip_id, 100);
+    let all_participants = syndication.get_all_participants(ip_id);
+    assert(all_participants.len() == 2, 'all participants len');
+    assert(*all_participants.at(0) == ALICE(), 'all first');
+    assert(*all_participants.at(1) == BOB(), 'all second');
+
+    let page = syndication.get_participants(ip_id, 1, 1);
+    assert(page.len() == 1, 'page len');
+    assert(*page.at(0) == BOB(), 'page participant');
+
+    let empty_page = syndication.get_participants(ip_id, 99, 10);
+    assert(empty_page.len() == 0, 'empty page');
 }
 
 #[test]
-#[should_panic(expected: ('Amount can not be zero',))]
-fn test_deposit_amount_is_zero() {
-    // Setup test environment, register and activate IP
-    let (ip_syndication, asset_nft, erc20, _) = setup();
-    let description: ByteArray = "description";
-    let uri: ByteArray = "flawless/";
-    let price = 100_u256;
-    let name = 'flawless';
-    let licensing_terms = 'Exclusive license';
+#[should_panic(expected: 'Syndication not active')]
+fn test_deposit_requires_active_syndication() {
+    let (syndication, token) = setup();
+    let ip_id = register_public(syndication, token, 1000);
 
-    start_cheat_caller_address(ip_syndication.contract_address, BOB());
-    let ip_id = ip_syndication
-        .register_ip(
-            price,
-            name,
-            description.clone(),
-            uri.clone(),
-            licensing_terms,
-            Mode::Public,
-            erc20.contract_address
-        );
-
-    ip_syndication.activate_syndication(ip_id);
-    stop_cheat_caller_address(ip_syndication.contract_address);
-
-    // Try to deposit zero amount (should fail)
-    ip_syndication.deposit(ip_id, 0);
+    cheat_caller_address(syndication.contract_address, ALICE(), CheatSpan::TargetCalls(1));
+    syndication.deposit(ip_id, 100);
 }
 
 #[test]
-#[should_panic(expected: ('Insufficient balance',))]
-fn test_deposit_insufficient_balance() {
-    // Setup test environment, register and activate IP
-    let (ip_syndication, asset_nft, erc20, _) = setup();
-    let description: ByteArray = "description";
-    let uri: ByteArray = "flawless/";
-    let price = 100_u256;
-    let name = 'flawless';
-    let licensing_terms = 'Exclusive license';
+#[should_panic(expected: 'Payment failed')]
+fn test_deposit_rejects_short_transfer_from_receipt() {
+    let syndication = deploy_syndication();
+    let token = deploy_malicious_erc20();
+    mint_erc20(token.contract_address, ALICE(), 1000000);
+    approve(token, ALICE(), syndication.contract_address);
 
-    start_cheat_caller_address(ip_syndication.contract_address, BOB());
-    let ip_id = ip_syndication
-        .register_ip(
-            price,
-            name,
-            description.clone(),
-            uri.clone(),
-            licensing_terms,
-            Mode::Public,
-            erc20.contract_address
-        );
+    let ip_id = register_public(syndication, token, 1000);
+    activate(syndication, ip_id);
+    configure_malicious_erc20(token, syndication, ip_id, SHORT_TRANSFER_FROM());
 
-    ip_syndication.activate_syndication(ip_id);
-    stop_cheat_caller_address(ip_syndication.contract_address);
-
-    // Try to deposit without having sufficient balance (should fail)
-    ip_syndication.deposit(ip_id, 100);
+    cheat_caller_address(syndication.contract_address, ALICE(), CheatSpan::TargetCalls(1));
+    syndication.deposit(ip_id, 100);
 }
 
 #[test]
-#[should_panic(expected: ('Address not whitelisted',))]
-fn test_deposit_for_whitelist_mode() {
-    // Setup test environment, register and activate IP in whitelist mode
-    let (ip_syndication, asset_nft, erc20, _) = setup();
-    let description: ByteArray = "description";
-    let uri: ByteArray = "flawless/";
-    let price = 100_u256;
-    let name = 'flawless';
-    let licensing_terms = 'Exclusive license';
+#[should_panic(expected: 'Reentrant call')]
+fn test_deposit_blocks_reentrant_token_callback() {
+    let syndication = deploy_syndication();
+    let token = deploy_malicious_erc20();
+    mint_erc20(token.contract_address, ALICE(), 1000000);
+    approve(token, ALICE(), syndication.contract_address);
 
-    start_cheat_caller_address(ip_syndication.contract_address, BOB());
-    let ip_id = ip_syndication
-        .register_ip(
-            price,
-            name,
-            description.clone(),
-            uri.clone(),
-            licensing_terms,
-            Mode::Whitelist,
-            erc20.contract_address
-        );
+    let ip_id = register_public(syndication, token, 1000);
+    activate(syndication, ip_id);
+    configure_malicious_erc20(token, syndication, ip_id, ATTACK_DEPOSIT());
 
-    ip_syndication.activate_syndication(ip_id);
-    stop_cheat_caller_address(ip_syndication.contract_address);
-
-    // Try to deposit as non-whitelisted address (should fail)
-    start_cheat_caller_address(ip_syndication.contract_address, OWNER());
-    ip_syndication.deposit(ip_id, 100);
+    cheat_caller_address(syndication.contract_address, ALICE(), CheatSpan::TargetCalls(1));
+    syndication.deposit(ip_id, 100);
 }
 
 #[test]
-#[should_panic(expected: ('Syndication not active',))]
-fn test_deposit_when_completed() {
-    // Setup test environment, register and activate IP
-    let (ip_syndication, asset_nft, erc20, _) = setup();
-    let description: ByteArray = "description";
-    let uri: ByteArray = "flawless/";
-    let price = 100_u256;
-    let name = 'flawless';
-    let licensing_terms = 'Exclusive license';
+fn test_whitelist_mode_deposit() {
+    let (syndication, token) = setup();
 
-    start_cheat_caller_address(ip_syndication.contract_address, BOB());
-    let ip_id = ip_syndication
+    cheat_caller_address(syndication.contract_address, CREATOR(), CheatSpan::TargetCalls(1));
+    let ip_id = syndication
         .register_ip(
-            price,
-            name,
-            description.clone(),
-            uri.clone(),
-            licensing_terms,
-            Mode::Public,
-            erc20.contract_address
+            1000, 'ip', "description", IPFS_URI(), 'terms', Mode::Whitelist, token.contract_address,
         );
 
-    ip_syndication.activate_syndication(ip_id);
-    stop_cheat_caller_address(ip_syndication.contract_address);
+    cheat_caller_address(syndication.contract_address, CREATOR(), CheatSpan::TargetCalls(1));
+    syndication.update_whitelist(ip_id, ALICE(), true);
+    cheat_caller_address(syndication.contract_address, CREATOR(), CheatSpan::TargetCalls(1));
+    syndication.activate_syndication(ip_id);
 
-    // Complete the syndication by depositing the full amount
-    start_cheat_caller_address(ip_syndication.contract_address, OWNER());
-    ip_syndication.deposit(ip_id, 100);
+    cheat_caller_address(syndication.contract_address, ALICE(), CheatSpan::TargetCalls(1));
+    syndication.deposit(ip_id, 100);
 
-    // Try to deposit again to completed syndication (should fail)
-    ip_syndication.deposit(ip_id, 100);
-    stop_cheat_caller_address(ip_syndication.contract_address);
+    assert(syndication.is_whitelisted(ip_id, ALICE()), 'alice whitelisted');
+    assert(syndication.get_participant_count(ip_id) == 1, 'participant count');
 }
 
 #[test]
-fn test_deposit_ok_public_mode() {
-    // Setup test environment, register and activate IP
-    let (ip_syndication, asset_nft, erc20, _) = setup();
-    let description: ByteArray = "description";
-    let uri: ByteArray = "flawless/";
-    let price = 100_u256;
-    let name = 'flawless';
-    let licensing_terms = 'Exclusive license';
-    let deposit = 100;
+#[should_panic(expected: 'Address not whitelisted')]
+fn test_whitelist_mode_rejects_non_whitelisted_deposit() {
+    let (syndication, token) = setup();
 
-    start_cheat_caller_address(ip_syndication.contract_address, BOB());
-    let ip_id = ip_syndication
+    cheat_caller_address(syndication.contract_address, CREATOR(), CheatSpan::TargetCalls(1));
+    let ip_id = syndication
         .register_ip(
-            price,
-            name,
-            description.clone(),
-            uri.clone(),
-            licensing_terms,
-            Mode::Public,
-            erc20.contract_address
+            1000, 'ip', "description", IPFS_URI(), 'terms', Mode::Whitelist, token.contract_address,
         );
+    activate(syndication, ip_id);
 
-    ip_syndication.activate_syndication(ip_id);
-    stop_cheat_caller_address(ip_syndication.contract_address);
-
-    // Record OWNER's balance before deposit
-    let owner_balance_before = erc20.balance_of(OWNER());
-
-    // Make deposit as OWNER
-    start_cheat_caller_address(ip_syndication.contract_address, OWNER());
-    ip_syndication.deposit(ip_id, deposit);
-    stop_cheat_caller_address(ip_syndication.contract_address);
-
-    // Verify participant is added correctly
-    let all_participants = ip_syndication.get_all_participants(ip_id);
-    assert(*all_participants.at(0) == OWNER(), 'wrong participant');
-
-    // Verify syndication details updated correctly
-    let syndication_details = ip_syndication.get_syndication_details(ip_id);
-    assert(syndication_details.total_raised == deposit, 'wrong total raised');
-    assert(syndication_details.participant_count == 1, 'wrong participant count');
-
-    // Verify participant details
-    let participant_details = ip_syndication.get_participant_details(ip_id, OWNER());
-    assert(participant_details.amount_deposited == deposit, 'wrong amount deposited');
-    assert(participant_details.minted == false, 'wrong minted status');
-    assert(participant_details.amount_refunded == 0, 'wrong amount refunded');
-
-    // Verify balances updated correctly
-    let owner_balance_after = erc20.balance_of(OWNER());
-    let ip_syn_balance = erc20.balance_of(ip_syndication.contract_address);
-    assert(ip_syn_balance == deposit, 'wrong ip syn balance');
-    assert(owner_balance_before - owner_balance_after == deposit, 'wrong owner balance');
+    cheat_caller_address(syndication.contract_address, ALICE(), CheatSpan::TargetCalls(1));
+    syndication.deposit(ip_id, 100);
 }
 
 #[test]
-fn test_deposit_ok_whitelist_mode() {
-    // Setup test environment, register and activate IP in whitelist mode
-    let (ip_syndication, asset_nft, erc20, _) = setup();
-    let description: ByteArray = "description";
-    let uri: ByteArray = "flawless/";
-    let price = 100_u256;
-    let name = 'flawless';
-    let licensing_terms = 'Exclusive license';
-    let deposit = 100;
+fn test_cancel_and_pull_refund() {
+    let (syndication, token) = setup();
+    let ip_id = register_public(syndication, token, 1000);
+    activate(syndication, ip_id);
 
-    start_cheat_caller_address(ip_syndication.contract_address, BOB());
-    let ip_id = ip_syndication
-        .register_ip(
-            price,
-            name,
-            description.clone(),
-            uri.clone(),
-            licensing_terms,
-            Mode::Whitelist,
-            erc20.contract_address
-        );
+    cheat_caller_address(syndication.contract_address, ALICE(), CheatSpan::TargetCalls(1));
+    syndication.deposit(ip_id, 400);
 
-    ip_syndication.activate_syndication(ip_id);
+    cheat_caller_address(syndication.contract_address, CREATOR(), CheatSpan::TargetCalls(1));
+    syndication.cancel_syndication(ip_id);
 
-    // Add ALICE to whitelist
-    ip_syndication.update_whitelist(ip_id, ALICE(), true);
-    stop_cheat_caller_address(ip_syndication.contract_address);
+    let alice_before = token.balance_of(ALICE());
+    cheat_caller_address(syndication.contract_address, ALICE(), CheatSpan::TargetCalls(1));
+    let refund = syndication.claim_refund(ip_id);
 
-    // Record ALICE's balance before deposit
-    let alice_balance_after_balance_before = erc20.balance_of(ALICE());
-
-    // Make deposit as ALICE (whitelisted)
-    start_cheat_caller_address(ip_syndication.contract_address, ALICE());
-    ip_syndication.deposit(ip_id, deposit);
-    stop_cheat_caller_address(ip_syndication.contract_address);
-
-    // Verify participant is added correctly
-    let all_participants = ip_syndication.get_all_participants(ip_id);
-    assert(*all_participants.at(0) == ALICE(), 'wrong participant');
-
-    // Verify syndication details updated correctly
-    let syndication_details = ip_syndication.get_syndication_details(ip_id);
-    assert(syndication_details.total_raised == deposit, 'wrong total raised');
-    assert(syndication_details.participant_count == 1, 'wrong participant count');
-
-    // Verify participant details
-    let participant_details = ip_syndication.get_participant_details(ip_id, ALICE());
-    assert(participant_details.amount_deposited == deposit, 'wrong amount deposited');
-    assert(participant_details.minted == false, 'wrong minted status');
-    assert(participant_details.amount_refunded == 0, 'wrong amount refunded');
-
-    // Verify balances updated correctly
-    let alice_balance_after = erc20.balance_of(ALICE());
-    let ip_syn_balance = erc20.balance_of(ip_syndication.contract_address);
-    assert(ip_syn_balance == deposit, 'wrong ip syn balance');
-    assert(
-        alice_balance_after_balance_before - alice_balance_after == deposit, 'wrong owner balance'
-    );
+    assert(refund == 400, 'refund should match');
+    assert(token.balance_of(ALICE()) == alice_before + 400, 'alice refunded');
+    assert(syndication.get_claimable_refund(ip_id, ALICE()) == 0, 'refund consumed');
 }
 
 #[test]
-fn test_deposit_with_excess_deposit() {
-    // Setup test environment, register and activate IP
-    let (ip_syndication, asset_nft, erc20, _) = setup();
-    let description: ByteArray = "description";
-    let uri: ByteArray = "flawless/";
-    let price = 100_u256;
-    let name = 'flawless';
-    let licensing_terms = 'Exclusive license';
-    let deposit = 200; // Double the price
-    let expected_deposit = 100; // Should only deposit up to price
+#[should_panic(expected: 'Reentrant call')]
+fn test_claim_refund_blocks_reentrant_token_callback() {
+    let syndication = deploy_syndication();
+    let token = deploy_malicious_erc20();
+    mint_erc20(token.contract_address, ALICE(), 1000000);
+    approve(token, ALICE(), syndication.contract_address);
 
-    start_cheat_caller_address(ip_syndication.contract_address, BOB());
-    let ip_id = ip_syndication
-        .register_ip(
-            price,
-            name,
-            description.clone(),
-            uri.clone(),
-            licensing_terms,
-            Mode::Public,
-            erc20.contract_address
-        );
+    let ip_id = register_public(syndication, token, 1000);
+    activate(syndication, ip_id);
 
-    ip_syndication.activate_syndication(ip_id);
-    stop_cheat_caller_address(ip_syndication.contract_address);
+    cheat_caller_address(syndication.contract_address, ALICE(), CheatSpan::TargetCalls(1));
+    syndication.deposit(ip_id, 400);
 
-    // Record OWNER's balance before deposit
-    let owner_balance_before = erc20.balance_of(OWNER());
+    cheat_caller_address(syndication.contract_address, CREATOR(), CheatSpan::TargetCalls(1));
+    syndication.cancel_syndication(ip_id);
+    configure_malicious_erc20(token, syndication, ip_id, ATTACK_REFUND());
 
-    // Make deposit with excess amount
-    start_cheat_caller_address(ip_syndication.contract_address, OWNER());
-    ip_syndication.deposit(ip_id, deposit);
-    stop_cheat_caller_address(ip_syndication.contract_address);
-
-    // Verify participant is added correctly
-    let all_participants = ip_syndication.get_all_participants(ip_id);
-    assert(*all_participants.at(0) == OWNER(), 'wrong participant');
-
-    // Verify syndication details updated correctly
-    let syndication_details = ip_syndication.get_syndication_details(ip_id);
-    assert(syndication_details.total_raised == expected_deposit, 'wrong total raised');
-    assert(syndication_details.participant_count == 1, 'wrong participant count');
-
-    // Verify participant details
-    let participant_details = ip_syndication.get_participant_details(ip_id, OWNER());
-    assert(participant_details.amount_deposited == expected_deposit, 'wrong amount deposited');
-    assert(participant_details.minted == false, 'wrong minted status');
-    assert(participant_details.amount_refunded == 0, 'wrong amount refunded');
-
-    // Verify balances updated correctly (only expected_deposit should be transferred)
-    let owner_balance_after = erc20.balance_of(OWNER());
-    let ip_syn_balance = erc20.balance_of(ip_syndication.contract_address);
-    assert(ip_syn_balance == expected_deposit, 'wrong ip syn balance');
-    assert(owner_balance_before - owner_balance_after == expected_deposit, 'wrong owner balance');
+    cheat_caller_address(syndication.contract_address, ALICE(), CheatSpan::TargetCalls(1));
+    syndication.claim_refund(ip_id);
 }
 
 #[test]
-fn test_get_participant_count() {
-    // Setup test environment, register and activate IP
-    let (ip_syndication, asset_nft, erc20, _) = setup();
-    let description: ByteArray = "description";
-    let uri: ByteArray = "flawless/";
-    let price = 1000_u256;
-    let name = 'flawless';
-    let licensing_terms = 'Exclusive license';
+#[should_panic(expected: 'Completed or cancelled')]
+fn test_cancel_rejects_completed_syndication() {
+    let (syndication, token) = setup();
+    let ip_id = register_public(syndication, token, 1000);
+    activate(syndication, ip_id);
 
-    start_cheat_caller_address(ip_syndication.contract_address, BOB());
-    let ip_id = ip_syndication
-        .register_ip(
-            price,
-            name,
-            description.clone(),
-            uri.clone(),
-            licensing_terms,
-            Mode::Public,
-            erc20.contract_address
-        );
+    cheat_caller_address(syndication.contract_address, ALICE(), CheatSpan::TargetCalls(1));
+    syndication.deposit(ip_id, 1000);
 
-    ip_syndication.activate_syndication(ip_id);
-    stop_cheat_caller_address(ip_syndication.contract_address);
-
-    // Add two participants
-    start_cheat_caller_address(ip_syndication.contract_address, OWNER());
-    ip_syndication.deposit(ip_id, 100);
-    stop_cheat_caller_address(ip_syndication.contract_address);
-
-    start_cheat_caller_address(ip_syndication.contract_address, ALICE());
-    ip_syndication.deposit(ip_id, 100);
-    stop_cheat_caller_address(ip_syndication.contract_address);
-
-    // Verify participant count
-    assert(ip_syndication.get_participant_count(ip_id) == 2, 'wrong participant count');
+    cheat_caller_address(syndication.contract_address, CREATOR(), CheatSpan::TargetCalls(1));
+    syndication.cancel_syndication(ip_id);
 }
 
 #[test]
-fn test_get_all_participants() {
-    // Setup test environment, register and activate IP
-    let (ip_syndication, asset_nft, erc20, _) = setup();
-    let description: ByteArray = "description";
-    let uri: ByteArray = "flawless/";
-    let price = 1000_u256;
-    let name = 'flawless';
-    let licensing_terms = 'Exclusive license';
+fn test_claim_proceeds_after_completion() {
+    let (syndication, token) = setup();
+    let ip_id = register_public(syndication, token, 1000);
+    activate(syndication, ip_id);
 
-    start_cheat_caller_address(ip_syndication.contract_address, BOB());
-    let ip_id = ip_syndication
-        .register_ip(
-            price,
-            name,
-            description.clone(),
-            uri.clone(),
-            licensing_terms,
-            Mode::Public,
-            erc20.contract_address
-        );
+    cheat_caller_address(syndication.contract_address, ALICE(), CheatSpan::TargetCalls(1));
+    syndication.deposit(ip_id, 1000);
 
-    ip_syndication.activate_syndication(ip_id);
-    stop_cheat_caller_address(ip_syndication.contract_address);
+    let creator_before = token.balance_of(CREATOR());
+    cheat_caller_address(syndication.contract_address, CREATOR(), CheatSpan::TargetCalls(1));
+    let proceeds = syndication.claim_proceeds(ip_id);
 
-    // Add two participants
-    start_cheat_caller_address(ip_syndication.contract_address, OWNER());
-    ip_syndication.deposit(ip_id, 100);
-    stop_cheat_caller_address(ip_syndication.contract_address);
-
-    start_cheat_caller_address(ip_syndication.contract_address, ALICE());
-    ip_syndication.deposit(ip_id, 100);
-    stop_cheat_caller_address(ip_syndication.contract_address);
-
-    // Verify participant list
-    let participants = ip_syndication.get_all_participants(ip_id);
-    assert(participants.len() == 2, 'wrong participant count');
-    assert(*participants.at(0) == OWNER(), 'wrong participant');
-    assert(*participants.at(1) == ALICE(), 'wrong participant');
+    assert(proceeds == 1000, 'proceeds should match');
+    assert(token.balance_of(CREATOR()) == creator_before + 1000, 'creator paid');
+    assert(syndication.get_syndication_details(ip_id).proceeds_claimed, 'claimed');
 }
 
 #[test]
-#[should_panic(expected: ('Not IP owner',))]
-fn test_update_whitelist_non_owner() {
-    // Setup test environment, register and activate IP in whitelist mode
-    let (ip_syndication, asset_nft, erc20, _) = setup();
-    let description: ByteArray = "description";
-    let uri: ByteArray = "flawless/";
-    let price = 1000_u256;
-    let name = 'flawless';
-    let licensing_terms = 'Exclusive license';
+#[should_panic(expected: 'Reentrant call')]
+fn test_claim_proceeds_blocks_reentrant_token_callback() {
+    let syndication = deploy_syndication();
+    let token = deploy_malicious_erc20();
+    mint_erc20(token.contract_address, ALICE(), 1000000);
+    approve(token, ALICE(), syndication.contract_address);
 
-    start_cheat_caller_address(ip_syndication.contract_address, BOB());
-    let ip_id = ip_syndication
-        .register_ip(
-            price,
-            name,
-            description.clone(),
-            uri.clone(),
-            licensing_terms,
-            Mode::Whitelist,
-            erc20.contract_address
-        );
+    let ip_id = register_public(syndication, token, 1000);
+    activate(syndication, ip_id);
 
-    ip_syndication.activate_syndication(ip_id);
-    stop_cheat_caller_address(ip_syndication.contract_address);
+    cheat_caller_address(syndication.contract_address, ALICE(), CheatSpan::TargetCalls(1));
+    syndication.deposit(ip_id, 1000);
+    configure_malicious_erc20(token, syndication, ip_id, ATTACK_PROCEEDS());
 
-    // Try to update whitelist as non-owner (should fail)
-    ip_syndication.update_whitelist(ip_id, ALICE(), true);
+    cheat_caller_address(syndication.contract_address, CREATOR(), CheatSpan::TargetCalls(1));
+    syndication.claim_proceeds(ip_id);
 }
 
 #[test]
-#[should_panic(expected: ('Syndication not active',))]
-fn test_update_whitelist_syndication_non_active() {
-    // Setup test environment and register IP (but don't activate)
-    let (ip_syndication, asset_nft, erc20, _) = setup();
-    let description: ByteArray = "description";
-    let uri: ByteArray = "flawless/";
-    let price = 1000_u256;
-    let name = 'flawless';
-    let licensing_terms = 'Exclusive license';
+#[should_panic(expected: 'Proceeds already claimed')]
+fn test_claim_proceeds_only_once() {
+    let (syndication, token) = setup();
+    let ip_id = register_public(syndication, token, 1000);
+    activate(syndication, ip_id);
 
-    start_cheat_caller_address(ip_syndication.contract_address, BOB());
-    let ip_id = ip_syndication
-        .register_ip(
-            price,
-            name,
-            description.clone(),
-            uri.clone(),
-            licensing_terms,
-            Mode::Whitelist,
-            erc20.contract_address
-        );
+    cheat_caller_address(syndication.contract_address, ALICE(), CheatSpan::TargetCalls(1));
+    syndication.deposit(ip_id, 1000);
 
-    // Try to update whitelist before activation (should fail)
-    ip_syndication.update_whitelist(ip_id, ALICE(), true);
-    stop_cheat_caller_address(ip_syndication.contract_address);
+    cheat_caller_address(syndication.contract_address, CREATOR(), CheatSpan::TargetCalls(1));
+    syndication.claim_proceeds(ip_id);
+    cheat_caller_address(syndication.contract_address, CREATOR(), CheatSpan::TargetCalls(1));
+    syndication.claim_proceeds(ip_id);
 }
 
 #[test]
-#[should_panic(expected: ('Not in whitelist mode',))]
-fn test_update_whitelist_not_in_whitelist_mode() {
-    // Setup test environment, register and activate IP in public mode
-    let (ip_syndication, asset_nft, erc20, _) = setup();
-    let description: ByteArray = "description";
-    let uri: ByteArray = "flawless/";
-    let price = 1000_u256;
-    let name = 'flawless';
-    let licensing_terms = 'Exclusive license';
+fn test_mint_asset_after_completion() {
+    let (syndication, token) = setup();
+    let alice = deploy_receiver();
+    let bob = deploy_receiver();
+    mint_erc20(token.contract_address, alice, 1000000);
+    mint_erc20(token.contract_address, bob, 1000000);
+    approve(token, alice, syndication.contract_address);
+    approve(token, bob, syndication.contract_address);
 
-    start_cheat_caller_address(ip_syndication.contract_address, BOB());
-    let ip_id = ip_syndication
-        .register_ip(
-            price,
-            name,
-            description.clone(),
-            uri.clone(),
-            licensing_terms,
-            Mode::Public,
-            erc20.contract_address
-        );
-    ip_syndication.activate_syndication(ip_id);
+    let ip_id = register_public(syndication, token, 1000);
+    activate(syndication, ip_id);
 
-    // Try to update whitelist in public mode (should fail)
-    ip_syndication.update_whitelist(ip_id, ALICE(), true);
-    stop_cheat_caller_address(ip_syndication.contract_address);
+    cheat_caller_address(syndication.contract_address, alice, CheatSpan::TargetCalls(1));
+    syndication.deposit(ip_id, 400);
+    cheat_caller_address(syndication.contract_address, bob, CheatSpan::TargetCalls(1));
+    syndication.deposit(ip_id, 600);
+
+    cheat_caller_address(syndication.contract_address, alice, CheatSpan::TargetCalls(1));
+    syndication.mint_asset(ip_id);
+
+    let erc1155 = IERC1155Dispatcher { contract_address: syndication.contract_address };
+    assert(erc1155.balance_of(alice, ip_id) == 400, 'alice share balance');
+    assert(syndication.total_shares_minted(ip_id) == 400, 'shares minted');
+    assert(syndication.get_participant_details(ip_id, alice).share_minted, 'minted flag');
 }
 
 #[test]
-fn test_update_whitelist_ok() {
-    // Setup test environment, register and activate IP in whitelist mode
-    let (ip_syndication, asset_nft, erc20, _) = setup();
-    let description: ByteArray = "description";
-    let uri: ByteArray = "flawless/";
-    let price = 1000_u256;
-    let name = 'flawless';
-    let licensing_terms = 'Exclusive license';
+#[should_panic(expected: 'Already minted')]
+fn test_mint_asset_only_once() {
+    let (syndication, token) = setup();
+    let participant = deploy_receiver();
+    mint_erc20(token.contract_address, participant, 1000000);
+    approve(token, participant, syndication.contract_address);
 
-    start_cheat_caller_address(ip_syndication.contract_address, BOB());
-    let ip_id = ip_syndication
-        .register_ip(
-            price,
-            name,
-            description.clone(),
-            uri.clone(),
-            licensing_terms,
-            Mode::Whitelist,
-            erc20.contract_address
-        );
-    ip_syndication.activate_syndication(ip_id);
+    let ip_id = register_public(syndication, token, 1000);
+    activate(syndication, ip_id);
 
-    // Update whitelist to add ALICE
-    ip_syndication.update_whitelist(ip_id, ALICE(), true);
-    stop_cheat_caller_address(ip_syndication.contract_address);
-
-    // Verify whitelist status
-    assert(ip_syndication.is_whitelisted(ip_id, ALICE()), 'alice should be whitelisted');
-    assert(!ip_syndication.is_whitelisted(ip_id, OWNER()), 'owner shouldnt be whitelisted');
+    cheat_caller_address(syndication.contract_address, participant, CheatSpan::TargetCalls(1));
+    syndication.deposit(ip_id, 1000);
+    cheat_caller_address(syndication.contract_address, participant, CheatSpan::TargetCalls(1));
+    syndication.mint_asset(ip_id);
+    cheat_caller_address(syndication.contract_address, participant, CheatSpan::TargetCalls(1));
+    syndication.mint_asset(ip_id);
 }
 
 #[test]
-#[should_panic(expected: ('Not IP owner',))]
-fn test_cancel_syndication_non_owner() {
-    // Setup test environment and register IP
-    let (ip_syndication, asset_nft, erc20, _) = setup();
-    let description: ByteArray = "description";
-    let uri: ByteArray = "flawless/";
-    let price = 1000_u256;
-    let name = 'flawless';
-    let licensing_terms = 'Exclusive license';
+fn test_mint_asset_to_receiver_contract() {
+    let (syndication, token) = setup();
+    let receiver = deploy_receiver();
+    mint_erc20(token.contract_address, receiver, 1000);
+    approve(token, receiver, syndication.contract_address);
 
-    start_cheat_caller_address(ip_syndication.contract_address, BOB());
-    let ip_id = ip_syndication
-        .register_ip(
-            price,
-            name,
-            description.clone(),
-            uri.clone(),
-            licensing_terms,
-            Mode::Public,
-            erc20.contract_address
-        );
-    stop_cheat_caller_address(ip_syndication.contract_address);
+    let ip_id = register_public(syndication, token, 1000);
+    activate(syndication, ip_id);
 
-    // Try to cancel as non-owner (should fail)
-    ip_syndication.cancel_syndication(ip_id);
+    cheat_caller_address(syndication.contract_address, receiver, CheatSpan::TargetCalls(1));
+    syndication.deposit(ip_id, 1000);
+    cheat_caller_address(syndication.contract_address, receiver, CheatSpan::TargetCalls(1));
+    syndication.mint_asset(ip_id);
+
+    let erc1155 = IERC1155Dispatcher { contract_address: syndication.contract_address };
+    assert(erc1155.balance_of(receiver, ip_id) == 1000, 'receiver balance');
 }
 
 #[test]
-#[should_panic(expected: ('Syn: completed or cancelled',))]
-fn test_cancel_syndication_when_completed() {
-    // Setup test environment, register and activate IP
-    let (ip_syndication, asset_nft, erc20, _) = setup();
-    let description: ByteArray = "description";
-    let uri: ByteArray = "flawless/";
-    let price = 100_u256;
-    let name = 'flawless';
-    let licensing_terms = 'Exclusive license';
+#[should_panic(expected: 'Reentrant call')]
+fn test_mint_asset_blocks_reentrant_receiver_callback() {
+    let (syndication, token) = setup();
+    let receiver = deploy_reentrant_receiver();
+    mint_erc20(token.contract_address, receiver, 1000);
+    approve(token, receiver, syndication.contract_address);
 
-    start_cheat_caller_address(ip_syndication.contract_address, BOB());
-    let ip_id = ip_syndication
-        .register_ip(
-            price,
-            name,
-            description.clone(),
-            uri.clone(),
-            licensing_terms,
-            Mode::Public,
-            erc20.contract_address
-        );
+    let ip_id = register_public(syndication, token, 1000);
+    activate(syndication, ip_id);
+    configure_reentrant_receiver(receiver, syndication, ip_id);
 
-    ip_syndication.activate_syndication(ip_id);
-    stop_cheat_caller_address(ip_syndication.contract_address);
-
-    // Complete the syndication by depositing the full amount
-    start_cheat_caller_address(ip_syndication.contract_address, OWNER());
-    ip_syndication.deposit(ip_id, 100);
-    stop_cheat_caller_address(ip_syndication.contract_address);
-
-    // Try to cancel a completed syndication (should fail)
-    start_cheat_caller_address(ip_syndication.contract_address, BOB());
-    ip_syndication.cancel_syndication(ip_id);
-    stop_cheat_caller_address(ip_syndication.contract_address);
+    cheat_caller_address(syndication.contract_address, receiver, CheatSpan::TargetCalls(1));
+    syndication.deposit(ip_id, 1000);
+    cheat_caller_address(syndication.contract_address, receiver, CheatSpan::TargetCalls(1));
+    syndication.mint_asset(ip_id);
 }
 
 #[test]
-fn test_cancel_syndication_ok() {
-    // Setup test environment, register and activate IP
-    let (ip_syndication, asset_nft, erc20, _) = setup();
-    let description: ByteArray = "description";
-    let uri: ByteArray = "flawless/";
-    let price = 1000_u256;
-    let name = 'flawless';
-    let licensing_terms = 'Exclusive license';
-    let deposit = 500;
+fn test_erc1155_share_is_transferable() {
+    let (syndication, token) = setup();
+    let alice = deploy_receiver();
+    let bob = deploy_receiver();
+    mint_erc20(token.contract_address, alice, 1000000);
+    approve(token, alice, syndication.contract_address);
 
-    start_cheat_caller_address(ip_syndication.contract_address, BOB());
-    let ip_id = ip_syndication
-        .register_ip(
-            price,
-            name,
-            description.clone(),
-            uri.clone(),
-            licensing_terms,
-            Mode::Public,
-            erc20.contract_address
-        );
+    let ip_id = register_public(syndication, token, 1000);
+    activate(syndication, ip_id);
 
-    ip_syndication.activate_syndication(ip_id);
-    stop_cheat_caller_address(ip_syndication.contract_address);
+    cheat_caller_address(syndication.contract_address, alice, CheatSpan::TargetCalls(1));
+    syndication.deposit(ip_id, 1000);
+    cheat_caller_address(syndication.contract_address, alice, CheatSpan::TargetCalls(1));
+    syndication.mint_asset(ip_id);
 
-    // Make deposit as OWNER
-    start_cheat_caller_address(ip_syndication.contract_address, OWNER());
-    ip_syndication.deposit(ip_id, deposit);
-    stop_cheat_caller_address(ip_syndication.contract_address);
+    let erc1155 = IERC1155Dispatcher { contract_address: syndication.contract_address };
+    cheat_caller_address(syndication.contract_address, alice, CheatSpan::TargetCalls(1));
+    erc1155.safe_transfer_from(alice, bob, ip_id, 250, array![].span());
 
-    // Record OWNER's balance before cancellation
-    let owner_balance_before = erc20.balance_of(OWNER());
-
-    // Cancel syndication as BOB (owner)
-    start_cheat_caller_address(ip_syndication.contract_address, BOB());
-    ip_syndication.cancel_syndication(ip_id);
-    stop_cheat_caller_address(ip_syndication.contract_address);
-
-    // Verify refund was processed
-    let owner_balance_after = erc20.balance_of(OWNER());
-    let syndication_details = ip_syndication.get_syndication_details(ip_id);
-
-    assert(owner_balance_after == owner_balance_before + deposit, 'wrong owner balance');
-    assert(erc20.balance_of(ip_syndication.contract_address) == 0, 'wrong balance after refund');
-    assert(syndication_details.status == Status::Cancelled, 'wrong status');
+    assert(erc1155.balance_of(alice, ip_id) == 750, 'alice balance');
+    assert(erc1155.balance_of(bob, ip_id) == 250, 'bob balance');
 }
 
 #[test]
-#[should_panic(expected: ('Syndication not completed',))]
-fn test_mint_asset_non_competed_syn() {
-    // Setup test environment, register and activate IP
-    let (ip_syndication, asset_nft, erc20, _) = setup();
-    let description: ByteArray = "description";
-    let uri: ByteArray = "flawless/";
-    let price = 1000_u256;
-    let name = 'flawless';
-    let licensing_terms = 'Exclusive license';
-    let deposit = 500;
+fn test_token_uri_and_src5() {
+    let (syndication, token) = setup();
+    let ip_id = register_public(syndication, token, 1000);
+    let metadata = IERC1155MetadataURIDispatcher { contract_address: syndication.contract_address };
+    let src5 = ISRC5Dispatcher { contract_address: syndication.contract_address };
 
-    start_cheat_caller_address(ip_syndication.contract_address, BOB());
-    let ip_id = ip_syndication
-        .register_ip(
-            price,
-            name,
-            description.clone(),
-            uri.clone(),
-            licensing_terms,
-            Mode::Public,
-            erc20.contract_address
-        );
-
-    ip_syndication.activate_syndication(ip_id);
-    stop_cheat_caller_address(ip_syndication.contract_address);
-
-    // Make partial deposit (not enough to complete syndication)
-    start_cheat_caller_address(ip_syndication.contract_address, OWNER());
-    ip_syndication.deposit(ip_id, deposit);
-    stop_cheat_caller_address(ip_syndication.contract_address);
-
-    // Try to mint before syndication is completed (should fail)
-    ip_syndication.mint_asset(ip_id);
+    assert(metadata.uri(ip_id) == IPFS_URI(), 'token uri');
+    assert(src5.supports_interface(IIP_SYNDICATION_ID), 'interface supported');
 }
 
 #[test]
-#[should_panic(expected: ('Not Syndication Participant',))]
-fn test_mint_asset_non_participant() {
-    // Setup test environment, register and activate IP
-    let (ip_syndication, asset_nft, erc20, _) = setup();
-    let description: ByteArray = "description";
-    let uri: ByteArray = "flawless/";
-    let price = 100;
-    let name = 'flawless';
-    let licensing_terms = 'Exclusive license';
-    let deposit = 100;
+#[should_panic(expected: 'IP does not exist')]
+fn test_missing_ip_reverts() {
+    let (syndication, _) = setup();
 
-    start_cheat_caller_address(ip_syndication.contract_address, BOB());
-    let ip_id = ip_syndication
-        .register_ip(
-            price,
-            name,
-            description.clone(),
-            uri.clone(),
-            licensing_terms,
-            Mode::Public,
-            erc20.contract_address
-        );
-
-    ip_syndication.activate_syndication(ip_id);
-    stop_cheat_caller_address(ip_syndication.contract_address);
-
-    // Complete the syndication as OWNER
-    start_cheat_caller_address(ip_syndication.contract_address, OWNER());
-    ip_syndication.deposit(ip_id, deposit);
-    stop_cheat_caller_address(ip_syndication.contract_address);
-
-    // Try to mint as ALICE who didn't participate (should fail)
-    start_cheat_caller_address(ip_syndication.contract_address, ALICE());
-    ip_syndication.mint_asset(ip_id);
-    stop_cheat_caller_address(ip_syndication.contract_address);
-}
-
-#[test]
-#[should_panic(expected: ('Already minted',))]
-fn test_mint_asset_already_minted() {
-    // Setup test environment, register and activate IP
-    let (ip_syndication, asset_nft, erc20, mike) = setup();
-    let description: ByteArray = "description";
-    let uri: ByteArray = "flawless/";
-    let price = 100;
-    let name = 'flawless';
-    let licensing_terms = 'Exclusive license';
-    let deposit = 100;
-
-    start_cheat_caller_address(ip_syndication.contract_address, BOB());
-    let ip_id = ip_syndication
-        .register_ip(
-            price,
-            name,
-            description.clone(),
-            uri.clone(),
-            licensing_terms,
-            Mode::Public,
-            erc20.contract_address
-        );
-
-    ip_syndication.activate_syndication(ip_id);
-    stop_cheat_caller_address(ip_syndication.contract_address);
-
-    // Complete the syndication as Mike
-    start_cheat_caller_address(ip_syndication.contract_address, mike);
-    ip_syndication.deposit(ip_id, deposit);
-    stop_cheat_caller_address(ip_syndication.contract_address);
-
-    // Mint asset
-    start_cheat_caller_address(ip_syndication.contract_address, mike);
-    ip_syndication.mint_asset(ip_id);
-
-    // Try to mint again (should fail)
-    ip_syndication.mint_asset(ip_id);
-    stop_cheat_caller_address(ip_syndication.contract_address);
-}
-
-#[test]
-fn test_mint_asset_ok() {
-    // Setup test environment, register and activate IP
-    let (ip_syndication, asset_nft, erc20, mike) = setup();
-    let description: ByteArray = "description";
-    let uri: ByteArray = "flawless/";
-    let price = 100_000_000;
-    let name = 'flawless';
-    let licensing_terms = 'Exclusive license';
-    let deposit_1 = 568;
-    let deposit_2 = 536;
-
-    start_cheat_caller_address(ip_syndication.contract_address, BOB());
-    let ip_id = ip_syndication
-        .register_ip(
-            price,
-            name,
-            description.clone(),
-            uri.clone(),
-            licensing_terms,
-            Mode::Public,
-            erc20.contract_address
-        );
-
-    ip_syndication.activate_syndication(ip_id);
-    stop_cheat_caller_address(ip_syndication.contract_address);
-
-    // Mike makes multiple deposits
-    start_cheat_caller_address(ip_syndication.contract_address, mike);
-    ip_syndication.deposit(ip_id, deposit_1);
-    ip_syndication.deposit(ip_id, deposit_2);
-    stop_cheat_caller_address(ip_syndication.contract_address);
-
-    // ALICE makes a deposit
-    start_cheat_caller_address(ip_syndication.contract_address, ALICE());
-    ip_syndication.deposit(ip_id, 10_000);
-    stop_cheat_caller_address(ip_syndication.contract_address);
-
-    // OWNER completes the syndication with a large deposit
-    start_cheat_caller_address(ip_syndication.contract_address, OWNER());
-    ip_syndication.deposit(ip_id, 100_000_000);
-    stop_cheat_caller_address(ip_syndication.contract_address);
-
-    // Mike mints his asset
-    start_cheat_caller_address(ip_syndication.contract_address, mike);
-    ip_syndication.mint_asset(ip_id);
-    stop_cheat_caller_address(ip_syndication.contract_address);
-
-    // Verify the ERC1155 token was minted with the correct amount
-    let erc1155 = IERC1155Dispatcher { contract_address: asset_nft.contract_address };
-    let balance_mike = erc1155.balance_of(mike, ip_id);
-
-    // Verify Mike's minted share is equal to his total deposits
-    assert(balance_mike == deposit_1 + deposit_2, 'wrong balance');
+    syndication.get_ip_metadata(1);
 }

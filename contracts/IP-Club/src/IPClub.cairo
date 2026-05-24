@@ -1,69 +1,52 @@
 #[starknet::contract]
 pub mod IPClub {
+    use core::hash::{HashStateExTrait, HashStateTrait};
     use core::num::traits::Zero;
-    use openzeppelin_access::accesscontrol::{AccessControlComponent, DEFAULT_ADMIN_ROLE};
-    use openzeppelin_token::erc20::interface::{IERC20Dispatcher, IERC20DispatcherTrait};
+    use core::poseidon::PoseidonTrait;
     use openzeppelin_introspection::src5::SRC5Component;
-    use openzeppelin_upgrades::UpgradeableComponent;
-    use openzeppelin_upgrades::interface::IUpgradeable;
-    use starknet::{
-        ClassHash, ContractAddress, get_caller_address, get_block_timestamp, get_contract_address,
+    use openzeppelin_token::erc20::interface::{IERC20Dispatcher, IERC20DispatcherTrait};
+    use starknet::storage::{
+        Map, StoragePathEntry, StoragePointerReadAccess, StoragePointerWriteAccess,
     };
     use starknet::syscalls::deploy_syscall;
-
-    use starknet::storage::{
-        StoragePointerReadAccess, StoragePointerWriteAccess, Map, StoragePathEntry,
+    use starknet::{
+        ClassHash, ContractAddress, get_block_timestamp, get_caller_address, get_contract_address,
     };
-
-    use crate::interfaces::IIPClub::IIPClub;
+    use crate::events::{ClubClosed, NewClubCreated, NewMember};
+    use crate::interfaces::IIPClub::{IIPClub, IIP_CLUB_ID};
     use crate::interfaces::IIPClubNFT::{IIPClubNFTDispatcher, IIPClubNFTDispatcherTrait};
-    use crate::events::{NewClubCreated, NewMember, ClubClosed};
-    use crate::types::{ClubRecord, ClubStatus};
+    use crate::types::{ClubRecord, ClubStatus, bytearray_starts_with};
 
-    component!(path: AccessControlComponent, storage: accesscontrol, event: AccessControlEvent);
     component!(path: SRC5Component, storage: src5, event: SRC5Event);
-    component!(path: UpgradeableComponent, storage: upgradeable, event: UpgradeableEvent);
 
     #[abi(embed_v0)]
-    impl AccessControlMixinImpl =
-        AccessControlComponent::AccessControlMixinImpl<ContractState>;
-
-    impl AccessControlInternalImpl = AccessControlComponent::InternalImpl<ContractState>;
-    impl UpgradeableInternalImpl = UpgradeableComponent::InternalImpl<ContractState>;
+    impl SRC5Impl = SRC5Component::SRC5Impl<ContractState>;
+    impl SRC5InternalImpl = SRC5Component::InternalImpl<ContractState>;
 
     #[storage]
     struct Storage {
         #[substorage(v0)]
-        accesscontrol: AccessControlComponent::Storage,
-        #[substorage(v0)]
         src5: SRC5Component::Storage,
-        #[substorage(v0)]
-        upgradeable: UpgradeableComponent::Storage,
         ip_club_nft_class_hash: ClassHash, // Class hash for club NFT contracts
         last_club_id: u256, // Last used club ID
-        clubs: Map<u256, ClubRecord> // Mapping from club ID to club record
+        clubs: Map<u256, ClubRecord>, // Mapping from club ID to club record
+        join_locked: bool,
     }
 
     #[event]
     #[derive(Drop, starknet::Event)]
     pub enum Event {
         #[flat]
-        AccessControlEvent: AccessControlComponent::Event,
-        #[flat]
         SRC5Event: SRC5Component::Event,
-        #[flat]
-        UpgradeableEvent: UpgradeableComponent::Event,
         NewClubCreated: NewClubCreated, // Emitted when a new club is created
         NewMember: NewMember, // Emitted when a new member joins a club
         ClubClosed: ClubClosed // Emitted when a club is closed
     }
 
     #[constructor]
-    fn constructor(
-        ref self: ContractState, admin: ContractAddress, ip_club_nft_class_hash: ClassHash,
-    ) {
-        self.accesscontrol.initializer(); // Initialize access control
-        self.accesscontrol._grant_role(DEFAULT_ADMIN_ROLE, admin); // Grant admin role to owner
+    fn constructor(ref self: ContractState, ip_club_nft_class_hash: ClassHash) {
+        assert(ip_club_nft_class_hash.into() != 0_felt252, 'Class hash is zero');
+        self.src5.register_interface(IIP_CLUB_ID);
         self.ip_club_nft_class_hash.write(ip_club_nft_class_hash); // Store NFT class hash
     }
 
@@ -80,7 +63,13 @@ pub mod IPClub {
             max_members: Option<u32>,
             entry_fee: Option<u256>,
             payment_token: Option<ContractAddress>,
-        ) {
+        ) -> u256 {
+            assert(name.len() > 0, 'Name must not be empty');
+            assert(symbol.len() > 0, 'Symbol must not be empty');
+            let valid_uri = bytearray_starts_with(@metadata_uri, @"ipfs://")
+                || bytearray_starts_with(@metadata_uri, @"ar://");
+            assert(valid_uri, 'URI must be ipfs:// or ar://');
+
             if let Option::Some(max) = max_members {
                 assert(max > 0, 'Max members cannot be zero');
             }
@@ -101,9 +90,14 @@ pub mod IPClub {
 
             let ip_club_manager = get_contract_address(); // Address of this contract
             let creator = get_caller_address(); // Club creator
+            assert(!creator.is_zero(), 'Creator is zero address');
             let next_club_id = self.last_club_id.read() + 1; // Increment club ID
+            let deploy_salt = PoseidonTrait::new()
+                .update_with(creator)
+                .update_with(next_club_id)
+                .finalize();
 
-            let mut constructor_calldata: Array::<felt252> = array![];
+            let mut constructor_calldata: Array<felt252> = array![];
 
             // Serialize constructor arguments for NFT contract
             (
@@ -118,7 +112,7 @@ pub mod IPClub {
 
             // Deploy the NFT contract for the club
             let (ip_club_nft_address, _) = deploy_syscall(
-                self.ip_club_nft_class_hash.read(), 0, constructor_calldata.span(), false,
+                self.ip_club_nft_class_hash.read(), deploy_salt, constructor_calldata.span(), false,
             )
                 .unwrap();
 
@@ -150,6 +144,8 @@ pub mod IPClub {
                         timestamp: get_block_timestamp(),
                     },
                 );
+
+            next_club_id
         }
 
         /// Closes an existing club, removing it from the registry.
@@ -161,6 +157,7 @@ pub mod IPClub {
             let mut club_record = self.clubs.entry(club_id).read();
             let caller = get_caller_address();
 
+            assert(club_record.status != ClubStatus::Inactive, 'Club does not exist');
             assert(club_record.status == ClubStatus::Open, 'Club not open');
             assert(club_record.creator == caller, 'Not Authorized');
 
@@ -184,6 +181,8 @@ pub mod IPClub {
 
             let caller = get_caller_address();
 
+            assert(!caller.is_zero(), 'Caller is zero address');
+            assert(club_record.status != ClubStatus::Inactive, 'Club does not exist');
             assert(club_record.status == ClubStatus::Open, 'Club not open');
 
             let is_member = self.is_member(club_id, caller);
@@ -194,21 +193,33 @@ pub mod IPClub {
                 assert(club_record.num_members < max, 'Club full');
             }
 
+            assert(!self.join_locked.read(), 'Reentrant join');
+            self.join_locked.write(true);
+
+            let creator = club_record.creator;
+            let club_nft = club_record.club_nft;
+            let entry_fee = club_record.entry_fee;
+            let payment_token = club_record.payment_token;
+
+            club_record.num_members += 1;
+            self.clubs.entry(club_id).write(club_record);
+
             // Handle entry fee payment if required
-            if let Option::Some(fee) = club_record.entry_fee {
-                let payment_token_address = club_record.payment_token.unwrap();
+            if let Option::Some(fee) = entry_fee {
+                let payment_token_address = match payment_token {
+                    Option::Some(token) => token,
+                    Option::None => panic!("Payment token missing"),
+                };
                 let payment_token = IERC20Dispatcher { contract_address: payment_token_address };
-                let result = payment_token.transfer_from(caller, club_record.creator, fee);
+                let result = payment_token.transfer_from(caller, creator, fee);
                 assert(result, 'Token Transfer Failed');
             }
 
             // Mint club NFT to the new member
-            let ip_club_nft = IIPClubNFTDispatcher { contract_address: club_record.club_nft };
+            let ip_club_nft = IIPClubNFTDispatcher { contract_address: club_nft };
             ip_club_nft.mint(caller);
 
-            club_record.num_members += 1;
-
-            self.clubs.entry(club_id).write(club_record);
+            self.join_locked.write(false);
 
             // Emit event for new member
             self.emit(NewMember { club_id, member: caller, timestamp: get_block_timestamp() });
@@ -216,28 +227,21 @@ pub mod IPClub {
 
         // Get the club record for a given club ID
         fn get_club_record(self: @ContractState, club_id: u256) -> ClubRecord {
-            self.clubs.entry(club_id).read()
+            let club_record = self.clubs.entry(club_id).read();
+            assert(club_record.status != ClubStatus::Inactive, 'Club does not exist');
+            club_record
         }
 
         // Check if a user is a member of a club (owns the club NFT)
         fn is_member(self: @ContractState, club_id: u256, user: ContractAddress) -> bool {
             let club_record = self.clubs.entry(club_id).read();
+            assert(club_record.status != ClubStatus::Inactive, 'Club does not exist');
             let ip_club_nft = IIPClubNFTDispatcher { contract_address: club_record.club_nft };
             ip_club_nft.has_nft(user)
         }
 
         fn get_last_club_id(self: @ContractState) -> u256 {
             self.last_club_id.read()
-        }
-    }
-
-    // Upgradeable logic implementation
-    #[abi(embed_v0)]
-    impl UpgradeableImpl of IUpgradeable<ContractState> {
-        // Upgrade contract to a new class hash (only admin)
-        fn upgrade(ref self: ContractState, new_class_hash: ClassHash) {
-            self.accesscontrol.assert_only_role(DEFAULT_ADMIN_ROLE);
-            self.upgradeable.upgrade(new_class_hash);
         }
     }
 }

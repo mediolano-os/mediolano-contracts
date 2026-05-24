@@ -6,7 +6,7 @@ pub trait IERC20Mint<TContractState> {
 }
 
 #[starknet::contract]
-pub mod MockERC20 {
+mod MockERC20 {
     use openzeppelin_token::erc20::{ERC20Component, ERC20HooksEmptyImpl};
     use starknet::ContractAddress;
     use super::IERC20Mint;

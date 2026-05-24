@@ -1,5 +1,8 @@
 use starknet::ContractAddress;
 
+pub const IIP_CLUB_NFT_ID: felt252 =
+    0x02ad826916536b2ddefafc363444005820a6fc6fd5eb34b4f4131b02a8a3cdf4;
+
 #[starknet::interface]
 pub trait IIPClubNFT<TContractState> {
     // Mintable functions

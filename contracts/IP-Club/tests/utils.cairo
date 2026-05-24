@@ -1,35 +1,27 @@
-use snforge_std::DeclareResultTrait;
-use starknet::{ContractAddress, contract_address_const, ClassHash};
-
-use openzeppelin_utils::serde::SerializedAppend;
-use snforge_std::{declare, ContractClassTrait};
-
 use ip_club::interfaces::IIPClub::IIPClubDispatcher;
 use ip_club::interfaces::IIPClubNFT::IIPClubNFTDispatcher;
-
-use openzeppelin_token::erc20::interface::IERC20Dispatcher;
 use ip_club::mocks::MockERC20::{IERC20MintDispatcher, IERC20MintDispatcherTrait};
+use openzeppelin_token::erc20::interface::IERC20Dispatcher;
+use openzeppelin_utils::serde::SerializedAppend;
+use snforge_std::{ContractClassTrait, DeclareResultTrait, declare};
+use starknet::{ClassHash, ContractAddress};
 
 pub const ONE_E18: u256 = 1000000000000000000_u256;
 
-pub fn ADMIN() -> ContractAddress {
-    contract_address_const::<'ADMIN'>()
-}
-
 pub fn CREATOR() -> ContractAddress {
-    contract_address_const::<'CREATOR'>()
+    0x101.try_into().unwrap()
 }
 
 pub fn USER1() -> ContractAddress {
-    contract_address_const::<'USER1'>()
+    0x102.try_into().unwrap()
 }
 
 pub fn USER2() -> ContractAddress {
-    contract_address_const::<'USER2'>()
+    0x103.try_into().unwrap()
 }
 
 pub fn ZERO_ADDRESS() -> ContractAddress {
-    contract_address_const::<0>()
+    0.try_into().unwrap()
 }
 
 pub fn declare_and_deploy(contract_name: ByteArray, calldata: Array<felt252>) -> ContractAddress {
@@ -55,11 +47,8 @@ pub fn mint_erc20(token: ContractAddress, recipient: ContractAddress, amount: u2
     IERC20MintDispatcher { contract_address: token }.mint(recipient, amount)
 }
 
-pub fn deploy_ip_club_contract(
-    admin: ContractAddress, ip_club_nft_class_hash: ClassHash,
-) -> IIPClubDispatcher {
+pub fn deploy_ip_club_contract(ip_club_nft_class_hash: ClassHash) -> IIPClubDispatcher {
     let mut calldata = array![];
-    calldata.append_serde(admin);
     calldata.append_serde(ip_club_nft_class_hash);
     let manager_contract = declare_and_deploy("IPClub", calldata);
     IIPClubDispatcher { contract_address: manager_contract }
@@ -84,6 +73,17 @@ pub fn deploy_ip_club_nft(
     IIPClubNFTDispatcher { contract_address: ip_club_nft }
 }
 
+pub fn deploy_receiver() -> ContractAddress {
+    declare_and_deploy("Receiver", array![])
+}
+
+pub fn deploy_reentrant_payment_token(ip_club: ContractAddress, club_id: u256) -> ContractAddress {
+    let mut calldata = array![];
+    calldata.append_serde(ip_club);
+    calldata.append_serde(club_id);
+    declare_and_deploy("ReentrantPaymentToken", calldata)
+}
+
 #[derive(Drop, Clone)]
 pub struct TestContracts {
     pub ip_club: IIPClubDispatcher,
@@ -94,8 +94,7 @@ pub struct TestContracts {
 pub fn initialize_contracts() -> TestContracts {
     let erc20_token = deploy_erc20();
     let ip_club_nft = declare("IPClubNFT").unwrap().contract_class();
-    let ip_club = deploy_ip_club_contract(ADMIN(), *ip_club_nft.class_hash);
+    let ip_club = deploy_ip_club_contract(*ip_club_nft.class_hash);
 
     TestContracts { ip_club, erc20_token }
 }
-

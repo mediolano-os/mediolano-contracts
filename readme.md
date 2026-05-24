@@ -1,327 +1,352 @@
-# Programmable IP for the Integrity Web
+# Mediolano OS
 
-Cairo smart contracts for Mediolano, the intellectual property provider of the integrity web, powered on Starknet.
+Programmable intellectual property primitives for the Integrity Web.
 
+Mediolano is a public-good protocol for tokenizing, protecting, licensing, and composing intellectual property powered on Starknet. This repository contains Cairo smart contracts for IP registration, collections, editions, licensing, access, revenue sharing, marketplace routing, and service assets.
 
-Quick links:
-<br>
-<a href="https://ip.mediolano.app">Mediolano IP Creator</a>
-<br>
-<a href="https://t.me/integrityweb">Telegram</a> | <a href="https://x.com/mediolanoapp">X / Twitter</a>
-<br>
+The core idea is simple: creators should be able to create immutable, censorship-resistant, zero-fee records of authorship and ownership through permissionless smart contracts they fully control.
 
+Mediolano is built for Berne Convention-aligned protection of literary and artistic works: assets created with Mediolano protocols carry durable authorship, provenance, metadata, and licensing records that can be verified independently of any single application, marketplace, gateway, or database.
 
+## Quick Links
+
+- Mediolano IP Creator: <https://ip.mediolano.app>
+- Community: <https://t.me/integrityweb>
+- X: <https://x.com/mediolanoapp>
 
 ## Mediolano
 
-Mediolano empowers creators, artists and organizations to make money from their content, without requiring them to know anything about crypto.
+Mediolano provides programmable IP tokenization primitives:
 
-With permissionless services for Programmable Intellectual Property (IP), leveraging Starknet’s high-speed, low-cost transactions and zero-knowledge proofs, Mediolano provides a comprehensive suite of solutions to tokenize and monetize assets efficiently, transparently and with sovereignty.
+- Immutable authorship and provenance records.
+- ERC-721 and ERC-1155 IP collection contracts.
+- Content-addressed metadata pointers for durable ownership and license claims.
+- Programmable licensing surfaces that remain readable by wallets, marketplaces, SDKs, indexers, and agents.
+- Service contracts for access, tickets, subscriptions, clubs, revenue sharing, escrow, assignment, licensing, drops, airdrops, and marketplace flows.
+- A neutral foundation that applications can index, render, and extend without becoming the source of truth.
 
-With zero fees, Mediolano’s open-source protocol and dapp ensures immediate tokenization and protection under the Berne Convention for the Protection of Literary and Artistic Works (1886), covering 181 countries. This framework guarantees global recognition of authorship, providing verifiable proof of ownership for 50 to 70 years, depending on jurisdiction.
+Mediolano contracts are designed as public infrastructure. The protocol should remain useful even if any one frontend, indexer, gateway, or commercial venue disappears.
 
-The platform also introduces advanced monetization, enabling diverse approaches to licensing, royalties, and financing creators economies. These tools are designed to offer integrations with various ecosystems, including communities, games, and AI agents, unlocking the true power of Programmable IP for the Integrity Web.
+## Public-Good Principles
 
-## Protocol Design
+### 1. Contracts Are The Source Of Truth
 
-The collections protocols prioritize security, performance, and simplicity. Shared invariants are kept small: immutable deployments, owner-gated minting, immutable metadata/provenance records, protocol-neutral metadata URIs, bounded input lengths, and explicit constructor validation.
+Ownership, balances, mint authority, provenance, order state, service records, and emitted events belong on-chain. Indexers, SDKs, and apps may cache and present that state, but they do not authorize it.
 
-Feature parity is intentional where it protects the same invariant across standards. It is not used to copy every feature between ERC-721 and ERC-1155: ERC-721 keeps unique IP asset behavior and archive support, while ERC-1155 keeps edition-style token types and ERC-2981 royalty signaling.
+### 2. Zero-Fee Protocol Layer
 
+Mediolano tokenization and protection primitives are zero-fee at the contract layer. Fee policy does not belong inside immutable public-good primitives.
 
-## Roadmap
+Applications may build their own models around the protocol, while the Mediolano substrate itself stays neutral.
 
-- [x] Starknet Ignition **24.9**
+### 3. Interoperability Over Lock-In
 
-- [x] MIP Protocol @ Starknet Sepolia **24.11**
+Mediolano assets use standard token interfaces and standard metadata envelopes wherever possible. Metadata should follow the OpenSea-compatible ERC-721 / ERC-1155 baseline:
 
-- [x] Mediolano Dapp @ Starknet Sepolia **24.11**
+- `name`
+- `description`
+- `image`
+- `animation_url` when useful
+- `external_url` when useful
+- `attributes`
 
-- [x] Programmable IP Contracts **25.02**
+Protocol-specific information should extend this baseline instead of replacing it. A Mediolano asset should remain understandable outside a Mediolano-specific interface.
 
-- [x] MIP Dapp @ Starknet Sepolia **25.06**
+### 4. Durable Authorship And Licensing
 
-- [X] MIP Protocol @ Starknet Mainnet **25.07**
+Authorship, ownership, and license claims should live in immutable, content-addressed metadata such as IPFS or Arweave documents referenced from the token.
 
-- [X] MIP Collections Protocol @ Starknet Sepolia **25.07**
+This supports Berne Convention-aligned authorship records across jurisdictions while avoiding brittle on-chain legal logic. Licensing is metadata-first and soft-enforced by default. Contracts enforce only the specific rules they explicitly implement, such as escrow, royalty splits, time locks, or access checks.
 
-- [X] MIP Dapp @ Starknet Mainnet **25.08**
+### 5. Visibility Is Not The Same As Tradability
 
-- [X] MIP Collections Protocol @ Starknet Mainnet **25.08**
+Service contracts should emit or mint indexable assets when doing so improves discovery, ownership visibility, access display, or marketplace routing.
 
-- [X] MIP Mobile @ Android Google Play **25.09**
+Tradability is a separate choice. A membership badge, subscription receipt, ticket, proof, or access pass may be visible and composable without being transferable by default. See [SERVICE_ASSET_DOCTRINE.md](docs/SERVICE_ASSET_DOCTRINE.md) for the service declaration model.
 
-- [X] MIP Mobile @ iPhone iOS App Store **25.12**
+### 6. Agents And Integrators Are First-Class Users
 
-- [X] Mediolano IP Creator Dapp @ Starknet Mainnet **26.01**
+The protocol should be legible to software, not only to humans. Services should expose stable identifiers, standard interfaces, clear events, and machine-readable metadata so wallets, SDKs, indexers, and autonomous agents can discover what exists and what actions are available.
 
-- [X] Security Audit and Review: IP Collections erc-721 Protocol +  IP Collections erc-1155 Protocol **26.04**
+## Repository Map
 
-- [X] Immutable Architecture Refactor: MIP Collections ERC-721 Protocol **26.05**
+Each contract package is self-contained and has its own `Scarb.toml`. Some packages are deployed and production-oriented; others are prototypes or pre-production service experiments. Treat each package README as the authority for its current status.
 
-- [X] Immutable MIP Collections ERC-721 Deployment @ Starknet Mainnet **26.05**
+### Core IP Issuance
 
+| Package | Purpose |
+| --- | --- |
+| `contracts/MIP-Collections-ERC721` | Immutable ERC-721 collection registry and factory. Deploys a dedicated `IPNft` contract per collection and preserves token provenance. |
+| `contracts/IP-Programmable-ERC1155-Collections` | Immutable ERC-1155 collection factory for edition-style IP assets. |
+| `contracts/IP-Programmable-ERC-721` | Standalone permissionless ERC-721 IP collection contract. |
+| `contracts/IP-collection-ERC-721` | Owner-minted ERC-721 collection for canonical issuer-controlled IP assets. |
+| `contracts/IP-Programmable-ERC-1155` | Legacy/prototype ERC-1155 IP contract. Use the collection-based ERC-1155 package for production-oriented work. |
+| `contracts/MIP-IP-Factory-ERC721` | Factory-oriented ERC-721 IP issuance package. |
+| `contracts/MIP-Openedition-ERC721a` | Open-edition ERC-721 issuance package. |
+| `contracts/IP-Bulk-Tokenization` | Batch IP tokenization flow for multiple ERC-721 mints. |
+| `contracts/IP-Colab-Collections` | Collaborative collection prototype. |
 
-## MIP Collections ERC-721
+### Identity, Provenance, And Discovery
 
-`contracts/MIP-Collections-ERC721` contains the immutable ERC-721 collection registry for Mediolano IP. The design separates permanent provenance from operational stewardship:
+| Package | Purpose |
+| --- | --- |
+| `contracts/IP-ID` | Append-only work identifier protocol for linking works, representations, and attestations. |
+| `contracts/IP-Assets-Visibility` | Asset visibility and discovery prototype. |
+| `contracts/User-Public-Profile` | Public profile records. |
+| `contracts/User-Settings` | User settings contract. |
+| `contracts/User-Achievements` | Achievement and reputation-oriented records. |
+| `contracts/Partner-Certification` | Partner certification records. |
 
-- `IPCollection` is an immutable registry and factory.
-- Each collection deploys its own immutable `IPNft` ERC-721 contract.
-- There is no global admin owner, upgrade function, mutable NFT class hash, or collection pause switch.
-- The registry constructor rejects a zero `IPNft` class hash.
-- Collection ownership can be transferred atomically by the current collection owner.
-- Ownership transfer only changes future mint authority; already minted token records remain unchanged.
-- Token legal records store immutable `metadata_uri`, `original_creator`, and `registered_at` fields.
-- The collection owner who mints is recorded as the immutable creator/author; the recipient only receives custody.
-- Token archive preserves the on-chain legal record instead of burning it.
-- Active ERC-721 tokens keep standard direct transfer behavior for wallet and marketplace composability.
-- Transfers routed through `IPCollection` additionally update protocol transfer stats and emit protocol transfer events.
-- `CollectionStats.total_transfers` counts only transfers routed through `IPCollection`; indexers should also read native `IPNft` ERC-721 `Transfer` events for complete transfer history.
-- Token metadata uses immutable per-token, protocol-neutral URIs. URIs must be non-empty and no longer than 2048 bytes; collection `base_uri` is informational and is not concatenated with token IDs.
+### Licensing, Rights, And Agreements
 
-This architecture is designed for creator sovereignty and social-login wallet handoff flows. For example, a creator can initialize a collection through an embedded wallet and later transfer collection stewardship to a regular wallet without changing historical authorship records.
+| Package | Purpose |
+| --- | --- |
+| `contracts/IP-License-Agreement` | Proof-of-IP licensing agreement signatures and agreement records. |
+| `contracts/IP-Offer-Licensing` | Licensing offer flow. |
+| `contracts/IP-Assignment` | Programmable IP rights assignment and royalty accounting. |
+| `contracts/IP-Collective-Agreement` | Multi-owner ERC-1155 IP agreement with governance and royalty distribution. |
+| `contracts/IP-Collective-Agreement-Leasing` | Collective agreement variant with leasing-oriented updates. |
+| `contracts/IP-Leasing` | IP leasing primitives. |
+| `contracts/IP-Leasing-AF` | Alternate IP leasing package. |
+| `contracts/IP-Revenue-Share` | Revenue sharing and distribution primitives. |
+| `contracts/IP-Franchise-Monetization` | Franchise-oriented IP monetization flow. |
+| `contracts/IP-Syndication` | IP syndication package. |
 
-### Mainnet Deployment
+### Access, Community, And Launch Services
 
-| Component | Class hash | Address |
-|---|---|---|
-| `IPNft` immutable ERC-721 class | `0x02d50b7e6d1a14f17a8fdc2df24d6e493bae6fae579656d81959b8c92de4b13f` | Collection instances are deployed by `IPCollection` |
-| `IPCollection` immutable registry/factory class | `0x00203f0e03a472cb6e058327ca22147c75e574cc2876f4981e99bcbcbe716a29` | `0x07c2207d200a1dce1cc82a117d8ba91dabfe3d1cc5072d9e4cdd9654fbb0ff10` |
+| Package | Purpose |
+| --- | --- |
+| `contracts/IP-Club` | Club manager that deploys non-transferable ERC-721 membership passes. |
+| `contracts/IP-Subscription` | Time-bound subscription plans and access records. |
+| `contracts/IP-Tickets` | Ticketing and redemption-oriented access assets. |
+| `contracts/IP-Drop` | Drop and claim flow. |
+| `contracts/IP-Airdrop` | Merkle-based airdrop flow. |
+| `contracts/IP-Launchpad` | Launchpad service primitives. |
+| `contracts/IP-Crowfunding` | Crowdfunding package. |
+| `contracts/IP-Sponsorhip` | Sponsorship package. |
+| `contracts/IP-Time-Capsule` | Time-locked IP capsule package. |
+| `contracts/IP-Story` | Story and narrative IP package. |
 
-| Action | Transaction | Actual fee |
-|---|---|---|
-| Declare `IPNft` | `0x0602f832d8bf6590780bb592c18e98aae9a0df9ad86245f94a92e1467ddbe2b8` | `24.308705 STRK` |
-| Declare `IPCollection` | `0x04c89525842cf5e9f95e23942017bbd7caac40ab1f193a4603a52799ddf59194` | `29.224179 STRK` |
-| Deploy `IPCollection` | `0x0543d8fe9e00c8981f6dd7d4148ad94cba8b9e6dfed69f1d4583c6034f71435f` | `0.036002 STRK` |
+### Marketplace And Transaction Services
 
-Build the contract:
+| Package | Purpose |
+| --- | --- |
+| `contracts/IP-Marketplace` | Marketplace contract package. |
+| `contracts/IP-Marketplace-Auction` | Auction marketplace package. |
+| `contracts/IP-Marketplace-Bulk-Order` | Bulk order marketplace flow. |
+| `contracts/IP-Marketplace-Listing` | Listing-oriented marketplace package. |
+| `contracts/IP-Marketplace-Public-Profile` | Marketplace profile records. |
+| `contracts/IP-Negotiation-Escrow` | Escrow flow for negotiated IP transactions. |
+| `contracts/IP-Commission-Escrow` | Commission escrow package. |
+| `contracts/IP-Smart-Transaction` | Smart transaction package. |
 
-```bash
-cd contracts/MIP-Collections-ERC721
-scarb build
+## Current Production Anchors
+
+The most current production-oriented packages are:
+
+- `contracts/MIP-Collections-ERC721`
+- `contracts/IP-Programmable-ERC1155-Collections`
+- `contracts/IP-Programmable-ERC-721`
+- `contracts/IP-collection-ERC-721`
+
+Several service packages are pre-production or prototypes and say so in their local README files. Before deployment, read the package README, review constructor requirements, check test coverage, and run a deployment rehearsal.
+
+## Contract Design Rules
+
+New and redesigned packages should follow these rules:
+
+- Keep protocol authority on-chain.
+- Keep tokenization and protection primitives zero-fee.
+- Prefer immutable deployments for core provenance contracts.
+- Store immutable metadata pointers; do not make authorship records mutable.
+- Separate creator/authorship provenance from token custody.
+- Use standard ERC-721, ERC-1155, ERC-20, SRC5, and metadata conventions where appropriate.
+- Encode license terms as standard metadata attributes.
+- Make stricter license or access enforcement explicit in the service contract.
+- Declare service assets and transferability semantics clearly.
+- Keep events indexable and stable.
+- Do not make an asset tradable only to gain visibility.
+
+## Service Asset Declaration
+
+Every service README should explain the asset it creates or the reason it does not create one.
+
+Recommended declaration fields:
+
+| Field | Meaning |
+| --- | --- |
+| `service_id` | Stable kebab-case behavior identifier. |
+| `asset_standard` | ERC721, ERC1155, ERC20, or none. |
+| `asset_role` | Membership, subscription, receipt, edition, proof, ticket, license, or another clear role. |
+| `transferability` | Transferable, non-transferable, restricted, or not-applicable. |
+| `access_semantics` | What grants access: ownership, balance, expiry, redemption, payment, or another rule. |
+| `marketplace_visibility` | Listed, displayed only, hidden, or routed through a custom market. |
+| `metadata_uri_policy` | Content-addressed metadata requirements. |
+| `src5_interface_id` | Custom interface ID for SDK and agent detection when applicable. |
+
+## Metadata And Licensing
+
+Mediolano metadata should be portable first and expressive second.
+
+Minimal ERC-721 / ERC-1155 metadata:
+
+```json
+{
+  "name": "Composition No. 7",
+  "description": "Original score, 2026.",
+  "image": "ipfs://bafy.../cover.png",
+  "animation_url": "ipfs://bafy.../audio.mp3",
+  "external_url": "https://ip.mediolano.app/asset/0x.../7",
+  "attributes": [
+    { "trait_type": "Medium", "value": "Audio" },
+    { "trait_type": "License", "value": "CC BY-SA" },
+    { "trait_type": "Commercial Use", "value": "Allowed" },
+    { "trait_type": "Derivatives", "value": "Share-alike" },
+    { "trait_type": "Attribution", "value": "Required" },
+    { "trait_type": "Territory", "value": "Worldwide" },
+    { "trait_type": "AI Policy", "value": "Training allowed with attribution" },
+    { "trait_type": "Royalty", "value": "5%" }
+  ]
+}
 ```
 
-Run tests:
+Licensing rules:
 
-```bash
-cd contracts/MIP-Collections-ERC721
-scarb test
-```
-
-Mainnet deployment flow:
-
-```bash
-cd contracts/MIP-Collections-ERC721
-
-# Build Sierra/CASM artifacts
-scarb build
-
-# Declare IPNft first
-sncast --profile medialane-mainnet --wait declare --contract-name IPNft
-
-# Declare IPCollection
-sncast --profile medialane-mainnet --wait declare --contract-name IPCollection
-
-# Deploy IPCollection with the declared IPNft class hash as constructor calldata
-sncast --profile medialane-mainnet --wait deploy \
-  --class-hash <IPCollection_CLASS_HASH> \
-  --constructor-calldata <IPNFT_CLASS_HASH>
-```
-
-See `contracts/MIP-Collections-ERC721/README.md` for the full contract-specific interface, storage, events, and deployment notes.
-
-## IP Programmable ERC-1155 Collections
-
-`contracts/IP-Programmable-ERC1155-Collections` contains immutable ERC-1155 collection contracts for edition-style IP assets.
-
-- `IPCollectionFactory` is a permissionless factory for standalone `IPCollection` deployments.
-- Each `IPCollection` is immutable and uses owner-gated minting.
-- Token type provenance stores immutable metadata URI, original creator, and registration timestamp on first mint.
-- The minter/collection owner is recorded as the immutable creator; the `to` address receives the minted balance.
-- Token URIs are protocol-neutral, non-empty, no longer than 2048 bytes, and written once per token type.
-- Factory and collection constructors reject zero owner/class-hash inputs.
-- ERC-2981 royalty signaling is available and defaults to 0%.
-
-See `contracts/IP-Programmable-ERC1155-Collections/README.md` for the full contract-specific interface, storage, events, and deployment notes.
-
+- `CC BY-SA` is the recommended default for remix-friendly public culture.
+- License traits are declarations in immutable metadata.
+- Royalty traits are display and intent signals unless a contract explicitly enforces payout logic.
+- A new license or changed metadata should be represented by a new work version or representation, not by mutating the old claim.
+- Jurisdiction-specific interpretation belongs in apps, partners, and legal workflows, not in default token contracts.
 
 ## Getting Started
 
-### Prerequisites
+### Requirements
 
-Before you begin, ensure you have the following requirements:
+- Git
+- Scarb
+- Starknet Foundry (`snforge` and `sncast`)
+- Node.js only for packages that include JavaScript or TypeScript utilities
 
-* **Git** for cloning and contributing.
-* **Scarb** for Cairo package management and builds.
-* **Starknet Foundry** for local Cairo/Starknet testing, declaration, deployment, and calls through `snforge` and `sncast`.
-* **Node.js** only for contracts or utilities that include JavaScript/TypeScript tooling.
+Check the repository toolchain:
 
-### System Requirements
+```bash
+cat .tool-versions
+```
 
-- **Git**
-- **Scarb**
-- **Starknet Foundry**
-- **Operating System**: macOS, Windows (including WSL), and Linux are supported
-
-### Installation
-
-1. **Clone the repository** to your local machine:
+Clone the repository:
 
 ```bash
 git clone https://github.com/mediolano-app/mediolano-contracts.git
 cd mediolano-contracts
 ```
 
-2. **Install dependencies**:
+Build a package:
 
 ```bash
-# Install Scarb (Cairo package manager)
-curl --proto '=https' --tlsv1.2 -sSf https://docs.swmansion.com/scarb/install.sh | sh
-
-# Install Starknet Foundry
-curl -L https://raw.githubusercontent.com/foundry-rs/starknet-foundry/master/scripts/install.sh | sh
-```
-
-3. **Build contracts**:
-
-```bash
-# Build a specific contract package
 cd contracts/MIP-Collections-ERC721
 scarb build
 ```
 
-4. **Run tests**:
+Run package tests:
 
 ```bash
-# Run tests for a specific contract package
 cd contracts/MIP-Collections-ERC721
 scarb test
 ```
 
-## Development
-
-### Project Structure
-
-```
-mediolano-contracts/
-├── contracts/
-│   ├── MIP-Collections-ERC721/      # Immutable ERC-721 IP collections
-│   ├── IP-Programmable-ERC1155-Collections/
-│   ├── IP-Marketplace/             # Marketplace contracts
-│   ├── IP-Marketplace-Auction/      # Auction marketplace
-│   ├── IP-Club/                    # Community management
-│   ├── IP-Revenue-Share/           # Revenue distribution
-│   ├── IP-License-Agreement/       # Licensing contracts
-│   ├── IP-Collective-Agreement/    # Multi-party agreements
-│   ├── User-Achievements/          # Gamification system
-│   └── ...                         # Additional contracts
-├── readme.md
-├── LICENSE
-└── CLAUDE.md
-```
-
-### Building and Testing
-
-Each contract directory contains its own `Scarb.toml` configuration file. You can build and test contracts individually:
+Some packages use `snforge test` through their Scarb scripts:
 
 ```bash
-# Navigate to specific contract
+cd contracts/IP-Club
+snforge test
+```
+
+Format a package:
+
+```bash
 cd contracts/MIP-Collections-ERC721
-
-# Build the contract
-scarb build
-
-# Run contract tests
-scarb test
-
-# Format code
 scarb fmt
 ```
 
-### Deployment
+## Deployment Guidance
 
-Each contract package has its own constructor and declaration order. Always check the contract-specific README before mainnet deployment.
+Each package has its own constructor arguments, declaration order, class names, and deployment state. Always use the package README as the deployment source.
 
-Generic `sncast` flow:
+Generic Starknet flow:
 
 ```bash
-# Declare a compiled contract class
+cd contracts/<PACKAGE>
+
+scarb build
+
 sncast --profile <profile> --wait declare --contract-name <CONTRACT_NAME>
 
-# Deploy with constructor calldata
 sncast --profile <profile> --wait deploy \
   --class-hash <CLASS_HASH> \
   --constructor-calldata <CONSTRUCTOR_ARGS...>
 ```
 
-For the current MIP Collections ERC-721 mainnet flow, see `contracts/MIP-Collections-ERC721/README.md`.
+Before mainnet deployment:
 
-## Security
+- Confirm the package is production-ready.
+- Read the local README and any audit or report files.
+- Run the test suite.
+- Validate constructor calldata.
+- Rehearse on testnet or a local fork.
+- Record class hashes, deployed addresses, and transactions in the package README.
 
-### Security Measures
+## Security Posture
 
-- **Contract-Specific Authorization**: Permissions are scoped per contract; MIP Collections ERC-721 uses immutable registry and collection-owner checks instead of a global admin.
-- **Immutable IP Collections**: MIP Collections ERC-721 and IP Programmable ERC-1155 Collections are immutable contract systems without collection upgrade entrypoints.
-- **Permanent Provenance**: IP collection tokens preserve immutable metadata URI, original creator, and registration timestamp.
-- **Protocol-Neutral Metadata**: Collection metadata pointers are validated for presence and a 2048-byte maximum length on-chain; storage scheme validation stays in SDKs, frontends, and indexers.
-- **Transferable Stewardship**: Collection ownership can move atomically to another wallet for future mint authority without changing historical token records.
-- **Composable ERC-721 Transfers**: Active MIP collection tokens support direct ERC-721 transfers; the registry transfer path remains available for protocol stats/events.
-- **Reentrancy Protection**: Guards against reentrancy attacks
-- **Input Validation**: Comprehensive validation of all user inputs
-- **Overflow Protection**: Safe math operations throughout
+Mediolano contracts favor small, inspectable invariants:
 
-## 🤝 Contributing
+- Immutable provenance records.
+- Explicit constructor validation.
+- Owner-gated minting where a collection has an issuer.
+- Permissionless deployment where the service is meant to be neutral.
+- Content-addressed metadata policies for service assets.
+- Standard transfer behavior for transferable assets.
+- Non-transferable or restricted behavior only when the service semantics require it.
+- No hidden platform authority inside protocol contracts.
 
-We are building open-source Integrity Web with the amazing **OnlyDust** platform. Check our [website](https://app.onlydust.com/p/mediolano) for more information.
+Security status varies by package. Some packages are audited or have deployment reports; others are prototypes without complete tests. Do not infer production readiness from the repository root.
 
-We also have a [Telegram](https://t.me/mediolanoapp) group focused to support development.
+## Contributing
 
-Contributions are **greatly appreciated**. If you have a feature or suggestion that would make our platform better, please fork the repo and create a pull request with the tag "enhancement".
+Contributions are welcome when they strengthen Mediolano as public infrastructure.
 
-### How to Contribute
+Good contributions usually do one of the following:
 
-1. **Fork the Project**
-2. **Create your Feature Branch** (`git checkout -b feature/Feature`)
-3. **Commit your Changes** (`git commit -m 'Add some Feature'`)
-4. **Push to the Branch** (`git push origin feature/YourFeature`)
-5. **Open a Pull Request**
+- Make a contract simpler or safer.
+- Add focused tests for a protocol invariant.
+- Improve package-level documentation.
+- Clarify service asset declarations.
+- Improve metadata, interface, or event interoperability.
+- Remove platform assumptions from protocol code.
 
-### Development Guidelines
+Before opening a pull request:
 
-- Follow Cairo best practices and coding standards
-- Write comprehensive tests for new features
-- Update documentation for any API changes
-- Ensure all tests pass before submitting a pull request
-- Use descriptive commit messages
+1. Fork the repository.
+2. Create a feature branch.
+3. Make the smallest coherent change.
+4. Run the relevant package tests.
+5. Update the package README when behavior changes.
+6. Open a pull request with a clear description of the invariant or workflow affected.
 
-### Issue Reporting
+Issue reports should include:
 
-When reporting issues, please include:
+- Package name.
+- Scarb and Starknet Foundry versions.
+- Steps to reproduce.
+- Expected behavior.
+- Actual behavior.
+- Logs, transaction hashes, or minimal examples when available.
 
-- **Environment details** (OS, Cairo version, Scarb version)
-- **Steps to reproduce** the issue
-- **Expected vs actual behavior**
-- **Error messages or logs**
-- **Minimal code example** if applicable
+## License
 
-## 📄 License
+This repository is licensed under the GNU Affero General Public License v3.0. See [LICENSE](LICENSE).
 
-This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
+## Acknowledgments
 
-## 🌟 Acknowledgments
+Mediolano is built for creators, builders, public-good maintainers, and the wider Integrity Web community.
 
-- **Starknet Foundation** for the amazing ZK-rollup technology
-- **OpenZeppelin** for secure smart contract components
-- **OnlyDust** for supporting open-source development
-- **Community Contributors** who make this project possible
-
-## 📞 Support
-
-- **Documentation**: Check individual contract READMEs for specific guidance
-- **Community**: Join our [Telegram](https://t.me/mediolanoapp) for discussions
-- **Issues**: Report bugs and feature requests on GitHub
-
----
-
-**Built with ❤️ for the Integrity Web on Starknet**
+Thanks to Salvador, Rodrigo, Starknet Foundation and ecosystem, Cairo developers and maintainers, OnlyDust contributors, ai agents and everyone dreaming.

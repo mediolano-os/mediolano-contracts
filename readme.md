@@ -62,8 +62,6 @@ This supports Berne Convention-aligned authorship records across jurisdictions w
 
 Service contracts should emit or mint indexable assets when doing so improves discovery, ownership visibility, access display, or marketplace routing.
 
-Tradability is a separate choice. A membership badge, subscription receipt, ticket, proof, or access pass may be visible and composable without being transferable by default. See [SERVICE_ASSET_DOCTRINE.md](docs/SERVICE_ASSET_DOCTRINE.md) for the service declaration model.
-
 ### 6. Agents And Integrators Are First-Class Users
 
 The protocol should be legible to software, not only to humans. Services should expose stable identifiers, standard interfaces, clear events, and machine-readable metadata so wallets, SDKs, indexers, and autonomous agents can discover what exists and what actions are available.

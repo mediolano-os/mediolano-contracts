@@ -5,8 +5,8 @@
 /// allowing safe_mint to succeed exactly as it would with a real user wallet.
 #[starknet::contract]
 pub mod MockAccount {
-    use openzeppelin::introspection::src5::SRC5Component;
     use openzeppelin::account::interface::ISRC6_ID;
+    use openzeppelin::introspection::src5::SRC5Component;
 
     component!(path: SRC5Component, storage: src5, event: SRC5Event);
 

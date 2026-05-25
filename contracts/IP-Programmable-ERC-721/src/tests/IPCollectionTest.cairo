@@ -1,17 +1,17 @@
 use ip_programmable_erc_721::interfaces::IIPCollection::{
-    IIPCollectionDispatcher, IIPCollectionDispatcherTrait,
+    IIPCollectionDispatcher, IIPCollectionDispatcherTrait, IIP_COLLECTION_ID,
+};
+use openzeppelin::introspection::interface::{ISRC5Dispatcher, ISRC5DispatcherTrait};
+use openzeppelin::token::erc721::extensions::erc721_enumerable::interface::{
+    IERC721EnumerableDispatcher, IERC721EnumerableDispatcherTrait,
 };
 use openzeppelin::token::erc721::interface::{
     IERC721Dispatcher, IERC721DispatcherTrait, IERC721MetadataDispatcher,
     IERC721MetadataDispatcherTrait,
 };
-use openzeppelin::token::erc721::extensions::erc721_enumerable::interface::{
-    IERC721EnumerableDispatcher, IERC721EnumerableDispatcherTrait,
-};
-use openzeppelin::introspection::interface::{ISRC5Dispatcher, ISRC5DispatcherTrait};
 use snforge_std::{
-    declare, ContractClassTrait, DeclareResultTrait, cheat_caller_address, CheatSpan,
-    cheat_block_timestamp, EventSpyAssertionsTrait, spy_events,
+    CheatSpan, ContractClassTrait, DeclareResultTrait, EventSpyAssertionsTrait,
+    cheat_block_timestamp, cheat_caller_address, declare, spy_events,
 };
 use starknet::ContractAddress;
 
@@ -91,6 +91,17 @@ fn setup() -> (IIPCollectionDispatcher, ContractAddress, ContractAddress, Contra
     (col, addr, user1, user2)
 }
 
+fn mint_as(
+    col: IIPCollectionDispatcher,
+    addr: ContractAddress,
+    creator: ContractAddress,
+    recipient: ContractAddress,
+    uri: ByteArray,
+) -> u256 {
+    cheat_caller_address(addr, creator, CheatSpan::TargetCalls(1));
+    col.mint_item(recipient, uri)
+}
+
 // ---------------------------------------------------------------------------
 // Constructor / Deployment
 // ---------------------------------------------------------------------------
@@ -129,23 +140,23 @@ fn test_initial_total_supply_is_zero() {
 
 #[test]
 fn test_mint_ipfs_uri_returns_token_id_one() {
-    let (col, _, user1, _) = setup();
-    let token_id = col.mint_item(user1, IPFS_URI());
+    let (col, addr, user1, _) = setup();
+    let token_id = mint_as(col, addr, user1, user1, IPFS_URI());
     assert(token_id == 1, 'first token id should be 1');
 }
 
 #[test]
 fn test_mint_ar_uri_returns_token_id_one() {
-    let (col, _, user1, _) = setup();
-    let token_id = col.mint_item(user1, AR_URI());
+    let (col, addr, user1, _) = setup();
+    let token_id = mint_as(col, addr, user1, user1, AR_URI());
     assert(token_id == 1, 'first token id should be 1');
 }
 
 #[test]
 fn test_mint_sequential_ids() {
-    let (col, _, user1, _) = setup();
-    let id1 = col.mint_item(user1, IPFS_URI());
-    let id2 = col.mint_item(user1, AR_URI());
+    let (col, addr, user1, _) = setup();
+    let id1 = mint_as(col, addr, user1, user1, IPFS_URI());
+    let id2 = mint_as(col, addr, user1, user1, AR_URI());
     assert(id1 == 1, 'first id should be 1');
     assert(id2 == 2, 'second id should be 2');
 }
@@ -153,7 +164,7 @@ fn test_mint_sequential_ids() {
 #[test]
 fn test_mint_balance_increments() {
     let (col, addr, user1, _) = setup();
-    col.mint_item(user1, IPFS_URI());
+    mint_as(col, addr, user1, user1, IPFS_URI());
     let erc721 = IERC721Dispatcher { contract_address: addr };
     assert(erc721.balance_of(user1) == 1, 'balance should be 1');
 }
@@ -161,7 +172,7 @@ fn test_mint_balance_increments() {
 #[test]
 fn test_mint_owner_of() {
     let (col, addr, user1, _) = setup();
-    let token_id = col.mint_item(user1, IPFS_URI());
+    let token_id = mint_as(col, addr, user1, user1, IPFS_URI());
     let erc721 = IERC721Dispatcher { contract_address: addr };
     assert(erc721.owner_of(token_id) == user1, 'owner should be user1');
 }
@@ -169,7 +180,7 @@ fn test_mint_owner_of() {
 #[test]
 fn test_mint_token_uri_exact_no_concatenation() {
     let (col, addr, user1, _) = setup();
-    let token_id = col.mint_item(user1, IPFS_URI());
+    let token_id = mint_as(col, addr, user1, user1, IPFS_URI());
     let meta = IERC721MetadataDispatcher { contract_address: addr };
     assert(meta.token_uri(token_id) == IPFS_URI(), 'uri should match exactly');
 }
@@ -177,16 +188,26 @@ fn test_mint_token_uri_exact_no_concatenation() {
 #[test]
 fn test_mint_token_uri_camel_matches_snake() {
     let (col, addr, user1, _) = setup();
-    let token_id = col.mint_item(user1, IPFS_URI());
+    let token_id = mint_as(col, addr, user1, user1, IPFS_URI());
     let meta = IERC721MetadataDispatcher { contract_address: addr };
     assert(meta.token_uri(token_id) == meta.token_uri(token_id), 'camel and snake should match');
 }
 
 #[test]
-fn test_mint_creator_is_recipient() {
-    let (col, _, user1, _) = setup();
-    let token_id = col.mint_item(user1, IPFS_URI());
+fn test_mint_records_caller_as_creator() {
+    let (col, addr, user1, _) = setup();
+    let token_id = mint_as(col, addr, user1, user1, IPFS_URI());
     assert(col.get_token_creator(token_id) == user1, 'creator should be user1');
+}
+
+#[test]
+fn test_mint_records_caller_as_creator_when_recipient_differs() {
+    let (col, addr, user1, user2) = setup();
+    let token_id = mint_as(col, addr, user1, user2, IPFS_URI());
+    let erc721 = IERC721Dispatcher { contract_address: addr };
+
+    assert(erc721.owner_of(token_id) == user2, 'owner should be recipient');
+    assert(col.get_token_creator(token_id) == user1, 'creator should be caller');
 }
 
 #[test]
@@ -194,7 +215,7 @@ fn test_mint_registered_at_matches_block_timestamp() {
     let (col, addr, user1, _) = setup();
     let ts: u64 = 1700000000;
     cheat_block_timestamp(addr, ts, CheatSpan::TargetCalls(1));
-    let token_id = col.mint_item(user1, IPFS_URI());
+    let token_id = mint_as(col, addr, user1, user1, IPFS_URI());
     assert(col.get_token_registered_at(token_id) == ts, 'timestamp should match');
 }
 
@@ -204,14 +225,10 @@ fn test_mint_emits_ipminted_event() {
     let mut spy = spy_events();
     let ts: u64 = 1700000000;
     cheat_block_timestamp(addr, ts, CheatSpan::TargetCalls(1));
-    let token_id = col.mint_item(user1, IPFS_URI());
+    let token_id = mint_as(col, addr, user1, user1, IPFS_URI());
     let expected = ip_programmable_erc_721::IPCollection::IPCollection::Event::IPMinted(
         ip_programmable_erc_721::IPCollection::IPCollection::IPMinted {
-            token_id,
-            recipient: user1,
-            uri: IPFS_URI(),
-            creator: user1,
-            registered_at: ts,
+            token_id, recipient: user1, uri: IPFS_URI(), creator: user1, registered_at: ts,
         },
     );
     spy.assert_emitted(@array![(addr, expected)]);
@@ -220,8 +237,8 @@ fn test_mint_emits_ipminted_event() {
 #[test]
 fn test_mint_enumerable_total_supply() {
     let (col, addr, user1, user2) = setup();
-    col.mint_item(user1, IPFS_URI());
-    col.mint_item(user2, AR_URI());
+    mint_as(col, addr, user1, user1, IPFS_URI());
+    mint_as(col, addr, user2, user2, AR_URI());
     let enumerable = IERC721EnumerableDispatcher { contract_address: addr };
     assert(enumerable.total_supply() == 2, 'total supply should be 2');
 }
@@ -229,7 +246,7 @@ fn test_mint_enumerable_total_supply() {
 #[test]
 fn test_mint_enumerable_token_by_index() {
     let (col, addr, user1, _) = setup();
-    let token_id = col.mint_item(user1, IPFS_URI());
+    let token_id = mint_as(col, addr, user1, user1, IPFS_URI());
     let enumerable = IERC721EnumerableDispatcher { contract_address: addr };
     assert(enumerable.token_by_index(0) == token_id, 'token_by_index(0) should be 1');
 }
@@ -237,11 +254,10 @@ fn test_mint_enumerable_token_by_index() {
 #[test]
 fn test_mint_enumerable_token_of_owner_by_index() {
     let (col, addr, user1, _) = setup();
-    let token_id = col.mint_item(user1, IPFS_URI());
+    let token_id = mint_as(col, addr, user1, user1, IPFS_URI());
     let enumerable = IERC721EnumerableDispatcher { contract_address: addr };
     assert(
-        enumerable.token_of_owner_by_index(user1, 0) == token_id,
-        'token_of_owner_by_index failed',
+        enumerable.token_of_owner_by_index(user1, 0) == token_id, 'token_of_owner_by_index failed',
     );
 }
 
@@ -286,9 +302,10 @@ fn test_mint_partial_ipfs_prefix_rejected() {
 fn test_mint_to_non_receiver_contract_rejected() {
     // Minting to a contract that supports neither ERC721Receiver nor SRC6 must revert.
     // Deploy a bare contract with no interface support as the recipient.
-    let (col, _, _, _) = setup();
+    let (col, addr, _, _) = setup();
     // Deploy IPCollection itself as a recipient — it has no receiver/account interface.
     let (_, non_receiver_addr) = deploy_contract(OWNER());
+    cheat_caller_address(addr, OWNER(), CheatSpan::TargetCalls(1));
     col.mint_item(non_receiver_addr, IPFS_URI());
 }
 
@@ -334,7 +351,7 @@ fn test_get_token_data_all_fields_correct() {
     let (col, addr, user1, _) = setup();
     let ts: u64 = 1700000000;
     cheat_block_timestamp(addr, ts, CheatSpan::TargetCalls(1));
-    let token_id = col.mint_item(user1, IPFS_URI());
+    let token_id = mint_as(col, addr, user1, user1, IPFS_URI());
     let data = col.get_token_data(token_id);
     assert(data.token_id == token_id, 'data.token_id mismatch');
     assert(data.owner == user1, 'data.owner mismatch');
@@ -350,7 +367,7 @@ fn test_get_token_data_all_fields_correct() {
 #[test]
 fn test_transfer_updates_owner() {
     let (col, addr, user1, user2) = setup();
-    let token_id = col.mint_item(user1, IPFS_URI());
+    let token_id = mint_as(col, addr, user1, user1, IPFS_URI());
     let erc721 = IERC721Dispatcher { contract_address: addr };
     cheat_caller_address(addr, user1, CheatSpan::TargetCalls(1));
     erc721.transfer_from(user1, user2, token_id);
@@ -360,7 +377,7 @@ fn test_transfer_updates_owner() {
 #[test]
 fn test_transfer_updates_balances() {
     let (col, addr, user1, user2) = setup();
-    let token_id = col.mint_item(user1, IPFS_URI());
+    let token_id = mint_as(col, addr, user1, user1, IPFS_URI());
     let erc721 = IERC721Dispatcher { contract_address: addr };
     cheat_caller_address(addr, user1, CheatSpan::TargetCalls(1));
     erc721.transfer_from(user1, user2, token_id);
@@ -371,7 +388,7 @@ fn test_transfer_updates_balances() {
 #[test]
 fn test_transfer_preserves_creator() {
     let (col, addr, user1, user2) = setup();
-    let token_id = col.mint_item(user1, IPFS_URI());
+    let token_id = mint_as(col, addr, user1, user1, IPFS_URI());
     let erc721 = IERC721Dispatcher { contract_address: addr };
     cheat_caller_address(addr, user1, CheatSpan::TargetCalls(1));
     erc721.transfer_from(user1, user2, token_id);
@@ -381,7 +398,7 @@ fn test_transfer_preserves_creator() {
 #[test]
 fn test_transfer_preserves_uri() {
     let (col, addr, user1, user2) = setup();
-    let token_id = col.mint_item(user1, IPFS_URI());
+    let token_id = mint_as(col, addr, user1, user1, IPFS_URI());
     let erc721 = IERC721Dispatcher { contract_address: addr };
     cheat_caller_address(addr, user1, CheatSpan::TargetCalls(1));
     erc721.transfer_from(user1, user2, token_id);
@@ -392,14 +409,12 @@ fn test_transfer_preserves_uri() {
 #[test]
 fn test_transfer_enumerable_updates() {
     let (col, addr, user1, user2) = setup();
-    let token_id = col.mint_item(user1, IPFS_URI());
+    let token_id = mint_as(col, addr, user1, user1, IPFS_URI());
     let erc721 = IERC721Dispatcher { contract_address: addr };
     cheat_caller_address(addr, user1, CheatSpan::TargetCalls(1));
     erc721.transfer_from(user1, user2, token_id);
     let enumerable = IERC721EnumerableDispatcher { contract_address: addr };
-    assert(
-        enumerable.token_of_owner_by_index(user2, 0) == token_id, 'user2 should own token',
-    );
+    assert(enumerable.token_of_owner_by_index(user2, 0) == token_id, 'user2 should own token');
 }
 
 // ---------------------------------------------------------------------------
@@ -420,6 +435,13 @@ fn test_supports_interface_erc721_enumerable() {
     assert(src5.supports_interface(IERC721_ENUMERABLE_ID()), 'should support enumerable');
 }
 
+#[test]
+fn test_supports_interface_ip_collection() {
+    let (_, addr) = deploy_contract(OWNER());
+    let src5 = ISRC5Dispatcher { contract_address: addr };
+    assert(src5.supports_interface(IIP_COLLECTION_ID), 'should support ip collection');
+}
+
 // ---------------------------------------------------------------------------
 // safe_mint — receiver contract
 // ---------------------------------------------------------------------------
@@ -428,7 +450,7 @@ fn test_supports_interface_erc721_enumerable() {
 fn test_mint_to_erc721_receiver_succeeds() {
     let (col, addr, _, _) = setup();
     let receiver = deploy_receiver();
-    col.mint_item(receiver, IPFS_URI());
+    mint_as(col, addr, OWNER(), receiver, IPFS_URI());
     let erc721 = IERC721Dispatcher { contract_address: addr };
     assert(erc721.balance_of(receiver) == 1, 'receiver balance should be 1');
 }
@@ -436,7 +458,7 @@ fn test_mint_to_erc721_receiver_succeeds() {
 #[test]
 fn test_mint_to_mock_account_succeeds() {
     let (col, addr, user1, _) = setup();
-    col.mint_item(user1, IPFS_URI());
+    mint_as(col, addr, user1, user1, IPFS_URI());
     let erc721 = IERC721Dispatcher { contract_address: addr };
     assert(erc721.balance_of(user1) == 1, 'mock acct balance should be 1');
 }

@@ -1,4 +1,9 @@
 // DESIGN: IPCollection is permanently immutable — no UpgradeableComponent, no admin roles.
+// This contract is the standalone Mediolano IP provenance ERC-721 service used
+// by genesis/shared mints. New collection protocols should use the MIP collection
+// architecture or the collaborative collection contracts instead of copying this
+// package as a factory template.
+//
 // Each deployment is a standalone ERC-721 NFT collection. The per-token URI,
 // creator address, and registration timestamp constitute the legal IP provenance
 // record under the Mediolano platform standard and the Berne Convention.
@@ -10,17 +15,17 @@
 
 #[starknet::contract]
 pub mod IPCollection {
+    use core::num::traits::Zero;
     use openzeppelin::introspection::src5::SRC5Component;
     use openzeppelin::token::erc721::ERC721Component;
     use openzeppelin::token::erc721::extensions::ERC721EnumerableComponent;
     use openzeppelin::token::erc721::interface::{IERC721Metadata, IERC721MetadataCamelOnly};
     use starknet::storage::{
-        Map, StoragePointerReadAccess, StoragePointerWriteAccess, StorageMapReadAccess,
-        StorageMapWriteAccess,
+        Map, StorageMapReadAccess, StorageMapWriteAccess, StoragePointerReadAccess,
+        StoragePointerWriteAccess,
     };
-    use core::num::traits::Zero;
-    use starknet::{ContractAddress, get_block_timestamp};
-    use crate::interfaces::IIPCollection::IIPCollection;
+    use starknet::{ContractAddress, get_block_timestamp, get_caller_address};
+    use crate::interfaces::IIPCollection::{IIPCollection, IIP_COLLECTION_ID};
     use crate::types::{TokenData, bytearray_starts_with};
 
     component!(path: ERC721Component, storage: erc721, event: ERC721Event);
@@ -43,6 +48,7 @@ pub mod IPCollection {
     // --- Internal implementations (not exposed) ---
     impl ERC721InternalImpl = ERC721Component::InternalImpl<ContractState>;
     impl ERC721EnumerableInternalImpl = ERC721EnumerableComponent::InternalImpl<ContractState>;
+    impl SRC5InternalImpl = SRC5Component::InternalImpl<ContractState>;
 
     #[storage]
     struct Storage {
@@ -94,18 +100,19 @@ pub mod IPCollection {
     /// # Arguments
     /// * `name`   - Human-readable collection name (e.g. "My IP Collection")
     /// * `symbol` - Collection ticker symbol (e.g. "MIP")
-    /// * `owner`  - Address recorded as the collection creator (informational, holds no power)
+    /// * `collection_creator` - Informational creator address (holds no admin power)
     #[constructor]
     fn constructor(
         ref self: ContractState,
         name: ByteArray,
         symbol: ByteArray,
-        owner: ContractAddress,
+        collection_creator: ContractAddress,
     ) {
         // base_uri is intentionally empty — every token stores its full ipfs:// or ar:// URI.
         self.erc721.initializer(name, symbol, "");
         self.erc721_enumerable.initializer();
-        self.collection_creator.write(owner);
+        self.src5.register_interface(IIP_COLLECTION_ID);
+        self.collection_creator.write(collection_creator);
         // Token IDs start at 1; zero is reserved as "non-existent"
         self.next_token_id.write(1);
     }
@@ -182,10 +189,13 @@ pub mod IPCollection {
             let token_id = self.next_token_id.read();
             self.next_token_id.write(token_id + 1);
 
+            let creator = get_caller_address();
+            assert(!creator.is_zero(), 'Creator is zero address');
+
             self.erc721.safe_mint(recipient, token_id, array![].span());
 
             self.token_uris.write(token_id, token_uri.clone());
-            self.token_creators.write(token_id, recipient);
+            self.token_creators.write(token_id, creator);
 
             let timestamp = get_block_timestamp();
             self.token_registered_at.write(token_id, timestamp);
@@ -193,11 +203,7 @@ pub mod IPCollection {
             self
                 .emit(
                     IPMinted {
-                        token_id,
-                        recipient,
-                        uri: token_uri,
-                        creator: recipient,
-                        registered_at: timestamp,
+                        token_id, recipient, uri: token_uri, creator, registered_at: timestamp,
                     },
                 );
 

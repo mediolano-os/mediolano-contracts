@@ -30,7 +30,7 @@ pub fn bytearray_starts_with(haystack: @ByteArray, needle: @ByteArray) -> bool {
             break;
         }
         i += 1;
-    };
+    }
     matches
 }
 

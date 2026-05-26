@@ -347,4 +347,4 @@ This repository is licensed under the GNU Affero General Public License v3.0. Se
 
 Mediolano is built for creators, builders, public-good maintainers, and the wider Integrity Web community.
 
-Thanks to Salvador, Rodrigo, Starknet Foundation and ecosystem, Cairo developers and maintainers, OnlyDust contributors, ai agents and everyone dreaming.
+Thanks to Salvador, Rodrigo, Pedro, Starknet Foundation and ecosystem, Cairo developers and maintainers, OnlyDust contributors, AI agents and dreamers that inspires us.

@@ -2,15 +2,9 @@
 version = 1
 
 [[package]]
-name = "alexandria_storage"
-version = "0.5.1"
-source = "git+https://github.com/keep-starknet-strange/alexandria.git#81854b445e3c1290b0df7622f39af7e467da5014"
-
-[[package]]
 name = "ip_time_capsule"
 version = "0.1.0"
 dependencies = [
- "alexandria_storage",
  "openzeppelin",
  "snforge_std",
 ]
@@ -123,15 +117,15 @@ source = "git+https://github.com/OpenZeppelin/cairo-contracts.git?tag=v0.20.0#77
 
 [[package]]
 name = "snforge_scarb_plugin"
-version = "0.44.0"
+version = "0.59.0"
 source = "registry+https://scarbs.xyz/"
-checksum = "sha256:ec8c7637b33392a53153c1e5b87a4617ddcb1981951b233ea043cad5136697e2"
+checksum = "sha256:871fba677c03b66a1bf40815dac0ab1b385eb1b9be6e6c3cf2ad9788eeb2b6bb"
 
 [[package]]
 name = "snforge_std"
-version = "0.44.0"
+version = "0.59.0"
 source = "registry+https://scarbs.xyz/"
-checksum = "sha256:d4affedfb90715b1ac417b915c0a63377ae6dd69432040e5d933130d65114702"
+checksum = "sha256:3620924fa08bd2d740b2b5b01ef86c8dab3d4b9c2206387c8dbdc8d2ec15133e"
 dependencies = [
  "snforge_scarb_plugin",
 ]

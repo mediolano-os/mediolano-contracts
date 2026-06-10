@@ -88,6 +88,8 @@ pub mod IPCollection {
         token_creators: Map<u256, ContractAddress>,
         /// Block timestamp at first mint — immutable proof of creation date.
         token_registered_at: Map<u256, u64>,
+        /// Next edition id to assign. Initialized to 1 at deploy; incremented per mint_edition.
+        next_token_id: u256,
     }
 
     #[event]
@@ -147,6 +149,8 @@ pub mod IPCollection {
         // Initialize ERC-2981 with 0% royalty pointing to owner.
         // Owner can activate royalties post-deploy via set_default_royalty(receiver, fee_numerator).
         self.erc2981.initializer(owner, 0);
+        // Editions are numbered from 1.
+        self.next_token_id.write(1);
     }
 
     // --- ERC1155 URI override ---
@@ -189,6 +193,20 @@ pub mod IPCollection {
         }
 
         // ── Minting ────────────────────────────────────────────────────────────
+
+        fn mint_edition(
+            ref self: ContractState,
+            to: ContractAddress,
+            value: u256,
+            token_uri: ByteArray,
+        ) -> u256 {
+            self.ownable.assert_only_owner();
+            assert(!to.is_zero(), 'Recipient is zero address');
+            let token_id = self.next_token_id.read();
+            self._mint_new(get_caller_address(), to, token_id, value, token_uri);
+            self.next_token_id.write(token_id + 1);
+            token_id
+        }
 
         fn mint_item(
             ref self: ContractState,
@@ -264,6 +282,35 @@ pub mod IPCollection {
 
     #[generate_trait]
     impl InternalImpl of InternalTrait {
+        /// Mints a brand-new edition: always records provenance (the id is guaranteed fresh
+        /// by the counter). `value` must be > 0; `token_uri` length is validated.
+        fn _mint_new(
+            ref self: ContractState,
+            creator: ContractAddress,
+            to: ContractAddress,
+            token_id: u256,
+            value: u256,
+            token_uri: ByteArray,
+        ) {
+            assert(value > 0, 'Value must be > 0');
+            assert(
+                token_uri.len() > 0 && token_uri.len() <= MAX_TOKEN_URI_LEN,
+                'Invalid URI length',
+            );
+            let timestamp = get_block_timestamp();
+            self.token_uris.write(token_id, token_uri.clone());
+            self.token_creators.write(token_id, creator);
+            self.token_registered_at.write(token_id, timestamp);
+            self.erc1155.mint_with_acceptance_check(to, token_id, value, array![].span());
+            self
+                .emit(
+                    IPMinted {
+                        token_id, recipient: to, value, uri: token_uri,
+                        creator, registered_at: timestamp,
+                    },
+                );
+        }
+
         /// Mints a single token type, recording immutable IP provenance on first mint.
         ///
         /// `creator` is the caller (collection owner) — the IP author under the Berne Convention.

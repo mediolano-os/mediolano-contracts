@@ -790,3 +790,40 @@ fn test_default_royalty_info_returns_denominator() {
     assert_eq!(numerator, 750);
     assert_eq!(denominator, 10_000);
 }
+
+// ─── mint_edition (on-chain sequential ids) ──────────────────────────────────────
+
+#[test]
+fn test_mint_edition_assigns_sequential_ids() {
+    let (collection, _) = deploy_collection(OWNER(), BASE_URI());
+    let recipient = deploy_receiver();
+    cheat_caller_address(collection.contract_address, OWNER(), CheatSpan::TargetCalls(3));
+    let id1 = collection.mint_edition(recipient, VALUE_1, IPFS_URI());
+    let id2 = collection.mint_edition(recipient, VALUE_1, IPFS_URI_2());
+    let id3 = collection.mint_edition(recipient, VALUE_1, AR_URI());
+    assert_eq!(id1, 1);
+    assert_eq!(id2, 2);
+    assert_eq!(id3, 3);
+}
+
+#[test]
+fn test_mint_edition_records_provenance_and_supply() {
+    let (collection, address) = deploy_collection(OWNER(), BASE_URI());
+    let recipient = deploy_receiver();
+    cheat_caller_address(address, OWNER(), CheatSpan::TargetCalls(1));
+    let id = collection.mint_edition(recipient, VALUE_1, IPFS_URI());
+    assert_eq!(collection.get_token_creator(id), OWNER());
+    let erc1155 = IERC1155Dispatcher { contract_address: address };
+    assert_eq!(erc1155.balance_of(recipient, id), VALUE_1);
+    let meta = IERC1155MetadataURIDispatcher { contract_address: address };
+    assert_eq!(meta.uri(id), IPFS_URI());
+}
+
+#[test]
+#[should_panic(expected: 'Caller is not the owner')]
+fn test_mint_edition_non_owner_reverts() {
+    let (collection, _) = deploy_collection(OWNER(), BASE_URI());
+    let recipient = deploy_receiver();
+    cheat_caller_address(collection.contract_address, USER1(), CheatSpan::TargetCalls(1));
+    collection.mint_edition(recipient, VALUE_1, IPFS_URI());
+}

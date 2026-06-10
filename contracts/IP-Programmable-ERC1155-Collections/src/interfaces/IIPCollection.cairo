@@ -27,6 +27,17 @@ pub trait IIPCollection<TContractState> {
 
     // ── Minting ────────────────────────────────────────────────────────────────
 
+    /// Mints a NEW edition with an id assigned atomically on-chain (sequential from 1).
+    /// Owner only. `to` must not be zero; `value` must be > 0; `token_uri` must be valid length.
+    /// Records the caller as the immutable IP creator + registration timestamp.
+    /// Returns the assigned token id.
+    fn mint_edition(
+        ref self: TContractState,
+        to: ContractAddress,
+        value: u256,
+        token_uri: ByteArray,
+    ) -> u256;
+
     /// Mints `value` copies of a new or existing token type to `to`.
     ///
     /// Owner only. `to` must not be the zero address. `value` must be > 0.

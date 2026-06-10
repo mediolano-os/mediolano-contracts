@@ -125,7 +125,7 @@ fn test_create_plan_is_permissionless() {
 
     let plan1 = subscription.get_plan(first);
     assert(plan1.creator == CREATOR1(), 'creator1 should be recorded');
-    assert(plan1.exists && plan1.active, 'plan1 should be live');
+    assert(plan1.active, 'plan1 should be live');
     assert(plan1.price == 0, 'price should be zero');
     assert(plan1.duration == HOUR, 'duration should match');
     assert(plan1.metadata_uri == IPFS_URI(), 'metadata should match');
@@ -183,7 +183,7 @@ fn test_free_plan_rejects_payment_token() {
 }
 
 #[test]
-#[should_panic]
+#[should_panic(expected: 'Paid plan requires token')]
 fn test_paid_plan_requires_payment_token() {
     let subscription = deploy_subscription();
 

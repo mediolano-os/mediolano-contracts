@@ -118,11 +118,8 @@ pub mod Subscription {
             if price == 0 {
                 assert(payment_token.is_none(), 'Free plan cannot use token');
             } else {
-                let token = match payment_token {
-                    Option::Some(token) => token,
-                    Option::None => panic!("Paid plan requires token"),
-                };
-                assert(!token.is_zero(), 'Payment token is zero');
+                assert(payment_token.is_some(), 'Paid plan requires token');
+                assert(!payment_token.unwrap().is_zero(), 'Payment token is zero');
             }
 
             let plan_id = self.last_plan_id.read() + 1;
@@ -134,7 +131,6 @@ pub mod Subscription {
                 payment_token,
                 metadata_uri: metadata_uri.clone(),
                 active: true,
-                exists: true,
             };
 
             self.plans.entry(plan_id).write(plan);
@@ -159,7 +155,7 @@ pub mod Subscription {
 
         fn set_plan_active(ref self: ContractState, plan_id: u256, active: bool) {
             let mut plan = self.plans.entry(plan_id).read();
-            assert(plan.exists, 'Plan does not exist');
+            assert(!plan.creator.is_zero(), 'Plan does not exist');
             assert(get_caller_address() == plan.creator, 'Only plan creator');
 
             plan.active = active;
@@ -173,7 +169,7 @@ pub mod Subscription {
             assert(!caller.is_zero(), 'Subscriber is zero address');
 
             let plan = self.plans.entry(plan_id).read();
-            assert(plan.exists, 'Plan does not exist');
+            assert(!plan.creator.is_zero(), 'Plan does not exist');
             assert(plan.active, 'Plan is inactive');
 
             let now = get_block_timestamp();
@@ -197,7 +193,7 @@ pub mod Subscription {
             assert(!caller.is_zero(), 'Subscriber is zero address');
 
             let plan = self.plans.entry(plan_id).read();
-            assert(plan.exists, 'Plan does not exist');
+            assert(!plan.creator.is_zero(), 'Plan does not exist');
             assert(plan.active, 'Plan is inactive');
 
             let now = get_block_timestamp();
@@ -235,7 +231,7 @@ pub mod Subscription {
 
         fn get_plan(self: @ContractState, plan_id: u256) -> PlanRecord {
             let plan = self.plans.entry(plan_id).read();
-            assert(plan.exists, 'Plan does not exist');
+            assert(!plan.creator.is_zero(), 'Plan does not exist');
             plan
         }
 
@@ -246,11 +242,9 @@ pub mod Subscription {
 
     fn collect_payment(payer: ContractAddress, plan: @PlanRecord) {
         if *plan.price > 0 {
-            let payment_token = match *plan.payment_token {
-                Option::Some(token) => token,
-                Option::None => panic!("Payment token missing"),
-            };
-            let token = IERC20Dispatcher { contract_address: payment_token };
+            // create_plan guarantees a paid plan carries a non-zero payment
+            // token, and plan terms are immutable.
+            let token = IERC20Dispatcher { contract_address: (*plan.payment_token).unwrap() };
             let result = token.transfer_from(payer, *plan.recipient, *plan.price);
             assert(result, 'Token Transfer Failed');
         }

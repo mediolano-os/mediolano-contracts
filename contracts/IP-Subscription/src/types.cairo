@@ -1,5 +1,6 @@
 use starknet::ContractAddress;
 
+// A plan exists iff `creator != 0` (create_plan rejects a zero caller).
 #[derive(Drop, Serde, starknet::Store, Clone)]
 pub struct PlanRecord {
     pub creator: ContractAddress,
@@ -9,7 +10,6 @@ pub struct PlanRecord {
     pub payment_token: Option<ContractAddress>,
     pub metadata_uri: ByteArray,
     pub active: bool,
-    pub exists: bool,
 }
 
 // A subscription exists iff `expires_at != 0`. It is active iff `expires_at >= now`.

@@ -38,6 +38,15 @@ pub trait IIPCollection<TContractState> {
         token_uri: ByteArray,
     ) -> u256;
 
+    /// Mints N new editions in one call; ids are assigned sequentially. Owner only.
+    /// `values` and `token_uris` must have equal length. Returns the assigned ids.
+    fn batch_mint_edition(
+        ref self: TContractState,
+        to: ContractAddress,
+        values: Span<u256>,
+        token_uris: Array<ByteArray>,
+    ) -> Span<u256>;
+
     /// Mints `value` additional copies of an EXISTING edition to `to`.
     /// Owner only. Reverts if `token_id` has never been minted. URI/provenance unchanged.
     fn add_supply(ref self: TContractState, to: ContractAddress, token_id: u256, value: u256);

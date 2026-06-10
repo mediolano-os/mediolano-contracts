@@ -413,6 +413,63 @@ fn test_total_editions_and_token_exists() {
     assert!(!collection.token_exists(3));
 }
 
+// ─── batch_mint_edition ──────────────────────────────────────────────────────────
+
+#[test]
+fn test_batch_mint_edition_sequential() {
+    let (collection, address) = deploy_collection(OWNER(), BASE_URI());
+    let recipient = deploy_receiver();
+    cheat_caller_address(address, OWNER(), CheatSpan::TargetCalls(1));
+    let ids = collection
+        .batch_mint_edition(
+            recipient, array![VALUE_1, VALUE_2].span(), array![IPFS_URI(), IPFS_URI_2()],
+        );
+    assert_eq!(*ids.at(0), 1);
+    assert_eq!(*ids.at(1), 2);
+    assert_eq!(collection.total_editions(), 2);
+    let erc1155 = IERC1155Dispatcher { contract_address: address };
+    assert_eq!(erc1155.balance_of(recipient, 1), VALUE_1);
+    assert_eq!(erc1155.balance_of(recipient, 2), VALUE_2);
+    let meta = IERC1155MetadataURIDispatcher { contract_address: address };
+    assert_eq!(meta.uri(2), IPFS_URI_2());
+}
+
+#[test]
+fn test_batch_then_single_continues_sequence() {
+    let (collection, _) = deploy_collection(OWNER(), BASE_URI());
+    let recipient = deploy_receiver();
+    cheat_caller_address(collection.contract_address, OWNER(), CheatSpan::TargetCalls(2));
+    collection.batch_mint_edition(recipient, array![VALUE_1, VALUE_1].span(), array![IPFS_URI(), AR_URI()]);
+    let next = collection.mint_edition(recipient, VALUE_1, HTTP_URI());
+    assert_eq!(next, 3);
+}
+
+#[test]
+#[should_panic(expected: 'Recipient is zero address')]
+fn test_batch_mint_edition_zero_recipient() {
+    let (collection, address) = deploy_collection(OWNER(), BASE_URI());
+    cheat_caller_address(address, OWNER(), CheatSpan::TargetCalls(1));
+    collection.batch_mint_edition(ZERO(), array![VALUE_1].span(), array![IPFS_URI()]);
+}
+
+#[test]
+#[should_panic(expected: 'Array length mismatch')]
+fn test_batch_mint_edition_length_mismatch() {
+    let (collection, address) = deploy_collection(OWNER(), BASE_URI());
+    let recipient = deploy_receiver();
+    cheat_caller_address(address, OWNER(), CheatSpan::TargetCalls(1));
+    collection.batch_mint_edition(recipient, array![VALUE_1, VALUE_2].span(), array![IPFS_URI()]);
+}
+
+#[test]
+#[should_panic(expected: 'Caller is not the owner')]
+fn test_batch_mint_edition_not_owner() {
+    let (collection, address) = deploy_collection(OWNER(), BASE_URI());
+    let recipient = deploy_receiver();
+    cheat_caller_address(address, USER1(), CheatSpan::TargetCalls(1));
+    collection.batch_mint_edition(recipient, array![VALUE_1].span(), array![IPFS_URI()]);
+}
+
 // ─── add_supply (re-supply an existing edition) ──────────────────────────────────
 
 #[test]

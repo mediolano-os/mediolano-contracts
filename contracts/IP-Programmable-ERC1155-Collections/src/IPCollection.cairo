@@ -208,6 +208,27 @@ pub mod IPCollection {
             token_id
         }
 
+        fn batch_mint_edition(
+            ref self: ContractState,
+            to: ContractAddress,
+            values: Span<u256>,
+            token_uris: Array<ByteArray>,
+        ) -> Span<u256> {
+            self.ownable.assert_only_owner();
+            assert(!to.is_zero(), 'Recipient is zero address');
+            assert(values.len() == token_uris.len(), 'Array length mismatch');
+            let creator = get_caller_address();
+            let mut ids: Array<u256> = array![];
+            let mut id = self.next_token_id.read();
+            for i in 0..values.len() {
+                self._mint_new(creator, to, id, *values.at(i), token_uris.at(i).clone());
+                ids.append(id);
+                id = id + 1;
+            }
+            self.next_token_id.write(id);
+            ids.span()
+        }
+
         fn add_supply(
             ref self: ContractState, to: ContractAddress, token_id: u256, value: u256,
         ) {

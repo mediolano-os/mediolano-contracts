@@ -256,6 +256,14 @@ pub mod IPCollection {
                 registered_at: self.token_registered_at.read(token_id),
             }
         }
+
+        fn total_editions(self: @ContractState) -> u256 {
+            self.next_token_id.read() - 1
+        }
+
+        fn token_exists(self: @ContractState, token_id: u256) -> bool {
+            self.token_creators.read(token_id).is_non_zero()
+        }
     }
 
     // --- Internal helpers ---

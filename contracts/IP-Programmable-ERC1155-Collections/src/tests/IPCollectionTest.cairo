@@ -398,6 +398,21 @@ fn test_mint_item_long_uri_rejected_for_new_token() {
     collection.mint_edition(recipient, VALUE_1, LONG_URI());
 }
 
+#[test]
+fn test_total_editions_and_token_exists() {
+    let (collection, _) = deploy_collection(OWNER(), BASE_URI());
+    let recipient = deploy_receiver();
+    assert_eq!(collection.total_editions(), 0);
+    assert!(!collection.token_exists(1));
+    cheat_caller_address(collection.contract_address, OWNER(), CheatSpan::TargetCalls(2));
+    collection.mint_edition(recipient, VALUE_1, IPFS_URI());
+    collection.mint_edition(recipient, VALUE_1, IPFS_URI_2());
+    assert_eq!(collection.total_editions(), 2);
+    assert!(collection.token_exists(1));
+    assert!(collection.token_exists(2));
+    assert!(!collection.token_exists(3));
+}
+
 // ─── add_supply (re-supply an existing edition) ──────────────────────────────────
 
 #[test]

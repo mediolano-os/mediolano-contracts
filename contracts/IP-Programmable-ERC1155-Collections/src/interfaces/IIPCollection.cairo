@@ -60,4 +60,10 @@ pub trait IIPCollection<TContractState> {
     /// Returns all provenance fields for a token type in a single call.
     /// Reverts if the token type has never been minted.
     fn get_token_data(self: @TContractState, token_id: u256) -> TokenData;
+
+    /// Number of distinct editions minted so far (sequential ids 1..=total_editions).
+    fn total_editions(self: @TContractState) -> u256;
+
+    /// True if `token_id` has been minted (an edition exists).
+    fn token_exists(self: @TContractState, token_id: u256) -> bool;
 }

@@ -93,3 +93,16 @@ contracts/IP-Programmable-ERC1155-Collections/
 ├── src/types.cairo
 └── src/tests/
 ```
+
+---
+
+## v0.3.0 addendum (2026-06-10)
+
+v0.3.0 (sequential on-chain edition ids: `mint_edition` / `batch_mint_edition` /
+`add_supply` replace `mint_item` / `batch_mint_item`; ownerless immutable factory) was
+re-audited before mainnet release: full vector-partition scan plus adversarial pass over
+the v0.3.0 source. No findings at or above the reporting threshold. One low-severity,
+owner-only hardening (internal operation-ordering refinement in the mint path) was
+identified and is scheduled for the next implementation revision; it does not affect
+third-party funds or provenance integrity for honestly-operated collections. The deployed
+mainnet class hashes were verified to build bit-for-bit from this repository's source.

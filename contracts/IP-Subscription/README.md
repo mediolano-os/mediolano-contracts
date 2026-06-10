@@ -1,11 +1,37 @@
 # IP Subscription
 
-`IP-Subscription` is a Starknet smart contract for time-bound access plans. It lets a creator deploy a subscription service, create plans, and let users subscribe, renew, cancel, or switch plans.
+`IP-Subscription` is a permissionless Starknet contract for prepaid, time-bound
+access plans. One immutable deployment serves every creator: anyone can create
+a plan; subscribers pay the plan's recipient directly and receive access until
+an explicit expiry.
 
-The protocol is designed as the subscription sibling of `IP-Club`:
+The protocol is the subscription sibling of `IP-Club`:
 
 - `IP-Club`: non-transferable membership access.
 - `IP-Subscription`: time-bound access with explicit expiry and renewal.
+
+## Design (v2, 2026-06-10)
+
+The v2 redesign aligns the contract with the Mediolano principles
+(permissionless, ownerless, immutable, zero-fee, minimal data):
+
+- **No contract owner.** `create_plan` is open to any caller; the plan's
+  creator is recorded per plan and is the only address that can toggle that
+  plan's `active` flag. The contract itself has no admin, no upgrade path, and
+  takes no fee.
+- **Paid time is inviolable.** Nothing in the contract can shorten a paid
+  period — including the plan creator. Deactivating a plan stops new
+  subscriptions and renewals (no new money), but existing access always runs
+  to its expiry.
+- **Disjoint verbs.** `subscribe` starts a period when none is active;
+  `renew_subscription` extends an active one from its current expiry. There is
+  no `unsubscribe` (prepaid access has nothing to cancel on-chain — removing
+  it removed the only path that could forfeit paid time) and no
+  `switch_subscription` (account abstraction composes it as a multicall).
+- **Minimal on-chain data.** A subscription is two timestamps keyed by
+  `(subscriber, plan_id)`. There is no enumerable subscriber roster; indexers
+  rebuild views from keyed events. Display data such as tier names lives in
+  the plan's content-addressed `metadata_uri`, not in storage.
 
 ## Service Asset Declaration
 
@@ -21,25 +47,12 @@ This service follows the shared doctrine in
 | `access_semantics` | `is_subscribed(subscriber, plan_id)` derives access from expiry |
 | `marketplace_visibility` | Service/event visibility; no asset listing yet |
 | `metadata_uri_policy` | `ipfs://` or `ar://` for plan metadata |
-| `src5_interface_id` | `IIP_SUBSCRIPTION_ID` |
+| `src5_interface_id` | `IIP_SUBSCRIPTION_ID` (`starknet_keccak("mediolano.ip-subscription.v2")`) |
 
-The current contract intentionally keeps access state as a plan-specific record
-rather than a tradable asset. If this service becomes asset-backed, the asset
-should be designed explicitly as a non-transferable receipt, transferable time
-pass, or ERC-1155 plan edition.
-
-## Features
-
-- Sequential plan IDs.
-- Explicit plan existence and active state.
-- Free plans.
-- Paid ERC-20 plans with direct payment to the configured recipient.
-- Plan-specific subscription records keyed by `(subscriber, plan_id)`.
-- Expiry-derived access checks.
-- Renewal from current expiry when still active, or from current time when expired.
-- Reentrancy guard for payment flows.
-- Keyed events for indexers.
-- SRC5 interface detection.
+The contract intentionally keeps access state as a plan-specific record rather
+than a tradable asset. If this service becomes asset-backed, the asset should
+be designed explicitly as a non-transferable receipt, transferable time pass,
+or ERC-1155 plan edition.
 
 ## Interface
 
@@ -47,83 +60,44 @@ pass, or ERC-1155 plan edition.
 fn create_plan(
     price: u256,
     duration: u64,
-    tier: felt252,
     payment_token: Option<ContractAddress>,
     recipient: ContractAddress,
     metadata_uri: ByteArray,
 ) -> u256;
 
-fn set_plan_active(plan_id: u256, active: bool);
-fn subscribe(plan_id: u256);
-fn renew_subscription(plan_id: u256);
-fn unsubscribe(plan_id: u256);
-fn switch_subscription(current_plan_id: u256, new_plan_id: u256);
+fn set_plan_active(plan_id: u256, active: bool); // plan creator only
+fn subscribe(plan_id: u256);                     // starts a period; collects payment
+fn renew_subscription(plan_id: u256);            // extends an active period from its expiry
 
 fn is_subscribed(subscriber: ContractAddress, plan_id: u256) -> bool;
 fn get_subscription(subscriber: ContractAddress, plan_id: u256) -> SubscriptionRecord;
 fn get_plan(plan_id: u256) -> PlanRecord;
 fn get_last_plan_id() -> u256;
-fn get_owner() -> ContractAddress;
-fn get_user_plan_ids(subscriber: ContractAddress) -> Array<u256>;
 ```
 
 Custom SRC5 interface ID:
 
 ```cairo
 IIP_SUBSCRIPTION_ID =
-0x02b8b00d09660d14a71dfb5dd9f0acd39174877cf4e400f727b397a385e61ae3
+0x013f7d8dc8964bc1dc290304c1f2641165381c97e48c9f1497f90a93f7d513ac
 ```
 
 ## Plan Rules
 
-Free plan:
+- Sequential plan IDs; plan economic terms (price, duration, token, recipient)
+  are immutable — new terms mean a new plan.
+- Free plans use `price = 0` and `payment_token = None`. Paid plans require an
+  ERC-20 token and transfer `price` from the subscriber to `recipient` inside
+  `subscribe`/`renew_subscription` (checks-effects-interactions; state is
+  final before the external call).
+- Renewing while active stacks duration onto the current expiry — subscribers
+  may prepay ahead at the plan's immutable price. This is intended.
+- Plan `metadata_uri` must be content-addressed (`ipfs://` or `ar://`) so the
+  record stays verifiable independently of any gateway.
 
-```text
-price = 0
-payment_token = Option::None
-recipient = non-zero creator/payment recipient
-metadata_uri = ipfs://... or ar://...
-```
-
-Paid plan:
-
-```text
-price > 0
-payment_token = Option::Some(erc20_address)
-recipient = non-zero creator/payment recipient
-metadata_uri = ipfs://... or ar://...
-```
-
-HTTP metadata is rejected.
-
-## Access Semantics
-
-A subscription is active when:
-
-```text
-record.exists && record.active && record.expires_at >= get_block_timestamp()
-```
-
-Unsubscribing sets `active = false` and moves `expires_at` to the unsubscribe timestamp.
-
-Renewing an active subscription extends from its current expiry. Renewing an expired subscription starts from the current block timestamp.
-
-## Development
+## Build & Test
 
 ```bash
-cd contracts/IP-Subscription
 scarb build
-snforge test
+snforge test   # 27 tests
 ```
-
-Tested baseline:
-
-| Package | Version |
-| --- | --- |
-| `starknet` | `2.12.0` |
-| `openzeppelin_*` | `0.20.0` |
-| `snforge_std` | `0.59.0` |
-
-## Status
-
-This package has been redesigned from the legacy prototype. It is still pre-production until it receives external security review and deployment rehearsal.

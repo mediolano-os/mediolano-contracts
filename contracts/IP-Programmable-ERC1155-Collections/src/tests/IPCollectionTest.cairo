@@ -189,11 +189,11 @@ fn test_uri_minted_token_returns_per_token_uri() {
     assert_eq!(metadata.uri(TOKEN_ID_1), IPFS_URI());
 }
 
-// ─── mint_item
+// ─── mint_edition (URI handling)
 // ─────────────────────────────────────────────────────────────────
 
 #[test]
-fn test_mint_item_ipfs_uri() {
+fn test_mint_edition_ipfs_uri() {
     let owner = OWNER();
     let (collection, address) = deploy_collection(owner, BASE_URI());
     let recipient = deploy_receiver();
@@ -206,7 +206,7 @@ fn test_mint_item_ipfs_uri() {
 }
 
 #[test]
-fn test_mint_item_ar_uri() {
+fn test_mint_edition_ar_uri() {
     let owner = OWNER();
     let (collection, address) = deploy_collection(owner, BASE_URI());
     let recipient = deploy_receiver();
@@ -219,7 +219,7 @@ fn test_mint_item_ar_uri() {
 }
 
 #[test]
-fn test_mint_item_future_uri_scheme() {
+fn test_mint_edition_future_uri_scheme() {
     let owner = OWNER();
     let (collection, address) = deploy_collection(owner, BASE_URI());
     let recipient = deploy_receiver();
@@ -232,7 +232,7 @@ fn test_mint_item_future_uri_scheme() {
 }
 
 #[test]
-fn test_mint_item_creator_is_caller_not_recipient() {
+fn test_mint_edition_creator_is_caller_not_recipient() {
     // The IP creator is the collection owner (caller), not the token recipient.
     // This correctly captures the Berne Convention author — the artist who mints, not the buyer.
     let owner = OWNER();
@@ -246,7 +246,7 @@ fn test_mint_item_creator_is_caller_not_recipient() {
 }
 
 #[test]
-fn test_mint_item_stores_registered_at() {
+fn test_mint_edition_stores_registered_at() {
     let owner = OWNER();
     let (collection, address) = deploy_collection(owner, BASE_URI());
     let recipient = deploy_receiver();
@@ -260,7 +260,7 @@ fn test_mint_item_stores_registered_at() {
 }
 
 #[test]
-fn test_mint_item_uri_stored() {
+fn test_mint_edition_uri_stored() {
     let owner = OWNER();
     let (collection, address) = deploy_collection(owner, BASE_URI());
     let recipient = deploy_receiver();
@@ -291,7 +291,7 @@ fn test_get_token_data_all_fields() {
 }
 
 #[test]
-fn test_mint_item_emits_ip_minted_event() {
+fn test_mint_edition_emits_ip_minted_event() {
     let owner = OWNER();
     let (collection, address) = deploy_collection(owner, BASE_URI());
     let recipient = deploy_receiver();
@@ -325,7 +325,7 @@ fn test_mint_item_emits_ip_minted_event() {
 
 #[test]
 #[should_panic(expected: 'Caller is not the owner')]
-fn test_mint_item_not_owner() {
+fn test_mint_edition_not_owner() {
     let owner = OWNER();
     let (collection, _) = deploy_collection(owner, BASE_URI());
     let recipient = deploy_receiver();
@@ -335,7 +335,7 @@ fn test_mint_item_not_owner() {
 
 #[test]
 #[should_panic(expected: 'Recipient is zero address')]
-fn test_mint_item_zero_recipient() {
+fn test_mint_edition_zero_recipient() {
     let owner = OWNER();
     let (collection, address) = deploy_collection(owner, BASE_URI());
 
@@ -345,7 +345,7 @@ fn test_mint_item_zero_recipient() {
 
 #[test]
 #[should_panic(expected: 'Value must be > 0')]
-fn test_mint_item_zero_value_rejected() {
+fn test_mint_edition_zero_value_rejected() {
     let owner = OWNER();
     let (collection, address) = deploy_collection(owner, BASE_URI());
     let recipient = deploy_receiver();
@@ -355,7 +355,7 @@ fn test_mint_item_zero_value_rejected() {
 }
 
 #[test]
-fn test_mint_item_bare_cid_allowed() {
+fn test_mint_edition_bare_cid_allowed() {
     let owner = OWNER();
     let (collection, address) = deploy_collection(owner, BASE_URI());
     let recipient = deploy_receiver();
@@ -368,7 +368,7 @@ fn test_mint_item_bare_cid_allowed() {
 }
 
 #[test]
-fn test_mint_item_http_uri_allowed() {
+fn test_mint_edition_http_uri_allowed() {
     let owner = OWNER();
     let (collection, address) = deploy_collection(owner, BASE_URI());
     let recipient = deploy_receiver();
@@ -382,7 +382,7 @@ fn test_mint_item_http_uri_allowed() {
 
 #[test]
 #[should_panic(expected: 'Invalid URI length')]
-fn test_mint_item_empty_uri_rejected_for_new_token() {
+fn test_mint_edition_empty_uri_rejected_for_new_token() {
     let owner = OWNER();
     let (collection, address) = deploy_collection(owner, BASE_URI());
     let recipient = deploy_receiver();
@@ -393,7 +393,7 @@ fn test_mint_item_empty_uri_rejected_for_new_token() {
 
 #[test]
 #[should_panic(expected: 'Invalid URI length')]
-fn test_mint_item_long_uri_rejected_for_new_token() {
+fn test_mint_edition_long_uri_rejected_for_new_token() {
     let owner = OWNER();
     let (collection, address) = deploy_collection(owner, BASE_URI());
     let recipient = deploy_receiver();

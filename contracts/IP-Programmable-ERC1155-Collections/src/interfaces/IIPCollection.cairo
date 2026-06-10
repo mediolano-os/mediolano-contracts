@@ -9,7 +9,8 @@ use crate::types::TokenData;
 /// at first mint of each token type, satisfying the Berne Convention authorship standard.
 #[starknet::interface]
 pub trait IIPCollection<TContractState> {
-    // ── Collection metadata ────────────────────────────────────────────────────
+    // ── Collection metadata
+    // ────────────────────────────────────────────────────
 
     /// Human-readable collection name set at deploy time.
     fn name(self: @TContractState) -> ByteArray;
@@ -25,39 +26,32 @@ pub trait IIPCollection<TContractState> {
     /// Returns the immutable implementation version for this deployed collection class.
     fn version(self: @TContractState) -> ByteArray;
 
-    // ── Minting ────────────────────────────────────────────────────────────────
+    // ── Minting
+    // ────────────────────────────────────────────────────────────────
 
-    /// Mints `value` copies of a new or existing token type to `to`.
-    ///
-    /// Owner only. `to` must not be the zero address. `value` must be > 0.
-    /// For new token types (first mint of this `token_id`):
-    ///   - `token_uri` is stored permanently and must have a valid length.
-    ///   - The caller (owner) is recorded as the original IP creator.
-    ///   - Block timestamp is recorded as the registration date.
-    /// For existing token types (subsequent mints): `token_uri` is ignored.
-    fn mint_item(
+    /// Mints a NEW edition with an id assigned atomically on-chain (sequential from 1).
+    /// Owner only. `to` must not be zero; `value` must be > 0; `token_uri` must be valid length.
+    /// Records the caller as the immutable IP creator + registration timestamp.
+    /// Returns the assigned token id.
+    fn mint_edition(
+        ref self: TContractState, to: ContractAddress, value: u256, token_uri: ByteArray,
+    ) -> u256;
+
+    /// Mints N new editions in one call; ids are assigned sequentially. Owner only.
+    /// `values` and `token_uris` must have equal length. Returns the assigned ids.
+    fn batch_mint_edition(
         ref self: TContractState,
         to: ContractAddress,
-        token_id: u256,
-        value: u256,
-        token_uri: ByteArray,
-    );
-
-    /// Batch version of `mint_item`. All token IDs in the batch are minted to `to`.
-    ///
-    /// Owner only. `to` must not be the zero address.
-    /// `token_ids`, `values`, and `token_uris` must have equal length.
-    /// All `value` entries must be > 0.
-    /// For each token_id: URI is stored only on first mint of that type.
-    fn batch_mint_item(
-        ref self: TContractState,
-        to: ContractAddress,
-        token_ids: Span<u256>,
         values: Span<u256>,
         token_uris: Array<ByteArray>,
-    );
+    ) -> Span<u256>;
 
-    // ── Provenance queries ─────────────────────────────────────────────────────
+    /// Mints `value` additional copies of an EXISTING edition to `to`.
+    /// Owner only. Reverts if `token_id` has never been minted. URI/provenance unchanged.
+    fn add_supply(ref self: TContractState, to: ContractAddress, token_id: u256, value: u256);
+
+    // ── Provenance queries
+    // ─────────────────────────────────────────────────────
 
     /// Returns the address that deployed this collection via the factory.
     /// Immutable — does not change if ownership is transferred.
@@ -75,4 +69,10 @@ pub trait IIPCollection<TContractState> {
     /// Returns all provenance fields for a token type in a single call.
     /// Reverts if the token type has never been minted.
     fn get_token_data(self: @TContractState, token_id: u256) -> TokenData;
+
+    /// Number of distinct editions minted so far (sequential ids 1..=total_editions).
+    fn total_editions(self: @TContractState) -> u256;
+
+    /// True if `token_id` has been minted (an edition exists).
+    fn token_exists(self: @TContractState, token_id: u256) -> bool;
 }

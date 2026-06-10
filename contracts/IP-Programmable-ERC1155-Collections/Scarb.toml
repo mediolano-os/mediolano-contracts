@@ -1,6 +1,6 @@
 [package]
 name = "ip_programmable_erc1155_collections"
-version = "0.2.0"
+version = "0.3.0"
 edition = "2024_07"
 
 [dependencies]

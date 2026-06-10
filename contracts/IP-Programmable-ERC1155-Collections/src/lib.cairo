@@ -14,6 +14,6 @@ pub mod mock_contracts {
 
 #[cfg(test)]
 mod tests {
-    mod IPCollectionTest;
     mod IPCollectionFactoryTest;
+    mod IPCollectionTest;
 }

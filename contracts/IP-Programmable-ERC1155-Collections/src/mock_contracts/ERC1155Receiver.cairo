@@ -6,7 +6,9 @@ pub mod ERC1155Receiver {
     use openzeppelin::token::erc1155::ERC1155ReceiverComponent;
 
     component!(path: SRC5Component, storage: src5, event: SRC5Event);
-    component!(path: ERC1155ReceiverComponent, storage: erc1155_receiver, event: ERC1155ReceiverEvent);
+    component!(
+        path: ERC1155ReceiverComponent, storage: erc1155_receiver, event: ERC1155ReceiverEvent,
+    );
 
     #[abi(embed_v0)]
     impl SRC5Impl = SRC5Component::SRC5Impl<ContractState>;

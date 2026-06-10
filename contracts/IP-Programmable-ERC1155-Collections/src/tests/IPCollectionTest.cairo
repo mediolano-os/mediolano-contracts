@@ -179,7 +179,7 @@ fn test_uri_minted_token_returns_per_token_uri() {
     let recipient = deploy_receiver();
 
     cheat_caller_address(address, owner, CheatSpan::TargetCalls(1));
-    collection.mint_item(recipient, TOKEN_ID_1, VALUE_1, IPFS_URI());
+    collection.mint_edition(recipient, VALUE_1, IPFS_URI());
 
     let metadata = IERC1155MetadataURIDispatcher { contract_address: address };
     // Minted token should return per-token URI, not base_uri
@@ -195,7 +195,7 @@ fn test_mint_item_ipfs_uri() {
     let recipient = deploy_receiver();
 
     cheat_caller_address(address, owner, CheatSpan::TargetCalls(1));
-    collection.mint_item(recipient, TOKEN_ID_1, VALUE_1, IPFS_URI());
+    collection.mint_edition(recipient, VALUE_1, IPFS_URI());
 
     let erc1155 = IERC1155Dispatcher { contract_address: address };
     assert_eq!(erc1155.balance_of(recipient, TOKEN_ID_1), VALUE_1);
@@ -208,7 +208,7 @@ fn test_mint_item_ar_uri() {
     let recipient = deploy_receiver();
 
     cheat_caller_address(address, owner, CheatSpan::TargetCalls(1));
-    collection.mint_item(recipient, TOKEN_ID_1, VALUE_1, AR_URI());
+    collection.mint_edition(recipient, VALUE_1, AR_URI());
 
     let erc1155 = IERC1155Dispatcher { contract_address: address };
     assert_eq!(erc1155.balance_of(recipient, TOKEN_ID_1), VALUE_1);
@@ -221,7 +221,7 @@ fn test_mint_item_future_uri_scheme() {
     let recipient = deploy_receiver();
 
     cheat_caller_address(address, owner, CheatSpan::TargetCalls(1));
-    collection.mint_item(recipient, TOKEN_ID_1, VALUE_1, FUTURE_URI());
+    collection.mint_edition(recipient, VALUE_1, FUTURE_URI());
 
     let metadata = IERC1155MetadataURIDispatcher { contract_address: address };
     assert_eq!(metadata.uri(TOKEN_ID_1), FUTURE_URI());
@@ -236,7 +236,7 @@ fn test_mint_item_creator_is_caller_not_recipient() {
     let recipient = deploy_receiver();
 
     cheat_caller_address(address, owner, CheatSpan::TargetCalls(1));
-    collection.mint_item(recipient, TOKEN_ID_1, VALUE_1, IPFS_URI());
+    collection.mint_edition(recipient, VALUE_1, IPFS_URI());
 
     assert_eq!(collection.get_token_creator(TOKEN_ID_1), owner);
 }
@@ -250,7 +250,7 @@ fn test_mint_item_stores_registered_at() {
     let mock_timestamp: u64 = 1700000000;
     cheat_block_timestamp(address, mock_timestamp, CheatSpan::TargetCalls(1));
     cheat_caller_address(address, owner, CheatSpan::TargetCalls(1));
-    collection.mint_item(recipient, TOKEN_ID_1, VALUE_1, IPFS_URI());
+    collection.mint_edition(recipient, VALUE_1, IPFS_URI());
 
     assert_eq!(collection.get_token_registered_at(TOKEN_ID_1), mock_timestamp);
 }
@@ -262,7 +262,7 @@ fn test_mint_item_uri_stored() {
     let recipient = deploy_receiver();
 
     cheat_caller_address(address, owner, CheatSpan::TargetCalls(1));
-    collection.mint_item(recipient, TOKEN_ID_1, VALUE_1, IPFS_URI());
+    collection.mint_edition(recipient, VALUE_1, IPFS_URI());
 
     let metadata = IERC1155MetadataURIDispatcher { contract_address: address };
     assert_eq!(metadata.uri(TOKEN_ID_1), IPFS_URI());
@@ -277,7 +277,7 @@ fn test_get_token_data_all_fields() {
     let mock_timestamp: u64 = 1700000000;
     cheat_block_timestamp(address, mock_timestamp, CheatSpan::TargetCalls(1));
     cheat_caller_address(address, owner, CheatSpan::TargetCalls(1));
-    collection.mint_item(recipient, TOKEN_ID_1, VALUE_1, IPFS_URI());
+    collection.mint_edition(recipient, VALUE_1, IPFS_URI());
 
     let token_data = collection.get_token_data(TOKEN_ID_1);
     assert_eq!(token_data.token_id, TOKEN_ID_1);
@@ -297,7 +297,7 @@ fn test_mint_item_emits_ip_minted_event() {
     cheat_caller_address(address, owner, CheatSpan::TargetCalls(1));
 
     let mut spy = spy_events();
-    collection.mint_item(recipient, TOKEN_ID_1, VALUE_1, IPFS_URI());
+    collection.mint_edition(recipient, VALUE_1, IPFS_URI());
 
     spy
         .assert_emitted(
@@ -326,7 +326,7 @@ fn test_mint_item_not_owner() {
     let (collection, _) = deploy_collection(owner, BASE_URI());
     let recipient = deploy_receiver();
     // No cheat: caller defaults to zero (not owner)
-    collection.mint_item(recipient, TOKEN_ID_1, VALUE_1, IPFS_URI());
+    collection.mint_edition(recipient, VALUE_1, IPFS_URI());
 }
 
 #[test]
@@ -336,7 +336,7 @@ fn test_mint_item_zero_recipient() {
     let (collection, address) = deploy_collection(owner, BASE_URI());
 
     cheat_caller_address(address, owner, CheatSpan::TargetCalls(1));
-    collection.mint_item(ZERO(), TOKEN_ID_1, VALUE_1, IPFS_URI());
+    collection.mint_edition(ZERO(), VALUE_1, IPFS_URI());
 }
 
 #[test]
@@ -347,7 +347,7 @@ fn test_mint_item_zero_value_rejected() {
     let recipient = deploy_receiver();
 
     cheat_caller_address(address, owner, CheatSpan::TargetCalls(1));
-    collection.mint_item(recipient, TOKEN_ID_1, 0, IPFS_URI());
+    collection.mint_edition(recipient, 0, IPFS_URI());
 }
 
 #[test]
@@ -357,7 +357,7 @@ fn test_mint_item_bare_cid_allowed() {
     let recipient = deploy_receiver();
 
     cheat_caller_address(address, owner, CheatSpan::TargetCalls(1));
-    collection.mint_item(recipient, TOKEN_ID_1, VALUE_1, BARE_CID());
+    collection.mint_edition(recipient, VALUE_1, BARE_CID());
 
     let metadata = IERC1155MetadataURIDispatcher { contract_address: address };
     assert_eq!(metadata.uri(TOKEN_ID_1), BARE_CID());
@@ -370,7 +370,7 @@ fn test_mint_item_http_uri_allowed() {
     let recipient = deploy_receiver();
 
     cheat_caller_address(address, owner, CheatSpan::TargetCalls(1));
-    collection.mint_item(recipient, TOKEN_ID_1, VALUE_1, HTTP_URI());
+    collection.mint_edition(recipient, VALUE_1, HTTP_URI());
 
     let metadata = IERC1155MetadataURIDispatcher { contract_address: address };
     assert_eq!(metadata.uri(TOKEN_ID_1), HTTP_URI());
@@ -384,7 +384,7 @@ fn test_mint_item_empty_uri_rejected_for_new_token() {
     let recipient = deploy_receiver();
 
     cheat_caller_address(address, owner, CheatSpan::TargetCalls(1));
-    collection.mint_item(recipient, TOKEN_ID_1, VALUE_1, "");
+    collection.mint_edition(recipient, VALUE_1, "");
 }
 
 #[test]
@@ -395,10 +395,10 @@ fn test_mint_item_long_uri_rejected_for_new_token() {
     let recipient = deploy_receiver();
 
     cheat_caller_address(address, owner, CheatSpan::TargetCalls(1));
-    collection.mint_item(recipient, TOKEN_ID_1, VALUE_1, LONG_URI());
+    collection.mint_edition(recipient, VALUE_1, LONG_URI());
 }
 
-// ─── Subsequent mint of same token_id ─────────────────────────────────────────
+// ─── add_supply (re-supply an existing edition) ──────────────────────────────────
 
 #[test]
 fn test_remint_existing_token_increases_balance() {
@@ -408,11 +408,11 @@ fn test_remint_existing_token_increases_balance() {
 
     // First mint — stores provenance
     cheat_caller_address(address, owner, CheatSpan::TargetCalls(1));
-    collection.mint_item(recipient, TOKEN_ID_1, VALUE_1, IPFS_URI());
+    collection.mint_edition(recipient, VALUE_1, IPFS_URI());
 
-    // Second mint — provenance unchanged, balance increases
+    // add_supply — provenance unchanged, balance increases
     cheat_caller_address(address, owner, CheatSpan::TargetCalls(1));
-    collection.mint_item(recipient, TOKEN_ID_1, VALUE_2, IPFS_URI());
+    collection.add_supply(recipient, TOKEN_ID_1, VALUE_2);
 
     let erc1155 = IERC1155Dispatcher { contract_address: address };
     assert_eq!(erc1155.balance_of(recipient, TOKEN_ID_1), VALUE_1 + VALUE_2);
@@ -426,11 +426,11 @@ fn test_remint_existing_token_preserves_creator() {
     let recipient2 = deploy_receiver();
 
     cheat_caller_address(address, owner, CheatSpan::TargetCalls(1));
-    collection.mint_item(recipient, TOKEN_ID_1, VALUE_1, IPFS_URI());
+    collection.mint_edition(recipient, VALUE_1, IPFS_URI());
 
-    // Second mint to different address — creator (owner/caller) is still unchanged
+    // add_supply to a different address — creator (owner/caller) is still unchanged
     cheat_caller_address(address, owner, CheatSpan::TargetCalls(1));
-    collection.mint_item(recipient2, TOKEN_ID_1, VALUE_2, IPFS_URI());
+    collection.add_supply(recipient2, TOKEN_ID_1, VALUE_2);
 
     assert_eq!(collection.get_token_creator(TOKEN_ID_1), owner);
 }
@@ -442,142 +442,33 @@ fn test_remint_existing_token_preserves_uri() {
     let recipient = deploy_receiver();
 
     cheat_caller_address(address, owner, CheatSpan::TargetCalls(1));
-    collection.mint_item(recipient, TOKEN_ID_1, VALUE_1, IPFS_URI());
+    collection.mint_edition(recipient, VALUE_1, IPFS_URI());
 
     cheat_caller_address(address, owner, CheatSpan::TargetCalls(1));
-    collection.mint_item(recipient, TOKEN_ID_1, VALUE_2, IPFS_URI_2());
+    collection.add_supply(recipient, TOKEN_ID_1, VALUE_2);
 
     let metadata = IERC1155MetadataURIDispatcher { contract_address: address };
     assert_eq!(metadata.uri(TOKEN_ID_1), IPFS_URI()); // original URI preserved
 }
 
-// ─── batch_mint_item ───────────────────────────────────────────────────────────
-
 #[test]
-fn test_batch_mint_item() {
-    let owner = OWNER();
-    let (collection, address) = deploy_collection(owner, BASE_URI());
+#[should_panic(expected: 'Token does not exist')]
+fn test_add_supply_unknown_id_reverts() {
+    let (collection, _) = deploy_collection(OWNER(), BASE_URI());
     let recipient = deploy_receiver();
-
-    let token_ids: Array<u256> = array![TOKEN_ID_1, TOKEN_ID_2, TOKEN_ID_3];
-    let values: Array<u256> = array![VALUE_1, VALUE_2, VALUE_3];
-    let uris: Array<ByteArray> = array![IPFS_URI(), AR_URI(), IPFS_URI_2()];
-
-    cheat_caller_address(address, owner, CheatSpan::TargetCalls(1));
-    collection.batch_mint_item(recipient, token_ids.span(), values.span(), uris);
-
-    let erc1155 = IERC1155Dispatcher { contract_address: address };
-    assert_eq!(erc1155.balance_of(recipient, TOKEN_ID_1), VALUE_1);
-    assert_eq!(erc1155.balance_of(recipient, TOKEN_ID_2), VALUE_2);
-    assert_eq!(erc1155.balance_of(recipient, TOKEN_ID_3), VALUE_3);
-}
-
-#[test]
-fn test_batch_mint_item_stores_per_token_uri() {
-    let owner = OWNER();
-    let (collection, address) = deploy_collection(owner, BASE_URI());
-    let recipient = deploy_receiver();
-
-    let token_ids: Array<u256> = array![TOKEN_ID_1, TOKEN_ID_2];
-    let values: Array<u256> = array![VALUE_1, VALUE_2];
-    let uris: Array<ByteArray> = array![IPFS_URI(), AR_URI()];
-
-    cheat_caller_address(address, owner, CheatSpan::TargetCalls(1));
-    collection.batch_mint_item(recipient, token_ids.span(), values.span(), uris);
-
-    let metadata = IERC1155MetadataURIDispatcher { contract_address: address };
-    assert_eq!(metadata.uri(TOKEN_ID_1), IPFS_URI());
-    assert_eq!(metadata.uri(TOKEN_ID_2), AR_URI());
-}
-
-#[test]
-fn test_batch_mint_item_creator_is_caller() {
-    let owner = OWNER();
-    let (collection, address) = deploy_collection(owner, BASE_URI());
-    let recipient = deploy_receiver();
-
-    let token_ids: Array<u256> = array![TOKEN_ID_1, TOKEN_ID_2];
-    let values: Array<u256> = array![VALUE_1, VALUE_2];
-    let uris: Array<ByteArray> = array![IPFS_URI(), AR_URI()];
-
-    cheat_caller_address(address, owner, CheatSpan::TargetCalls(1));
-    collection.batch_mint_item(recipient, token_ids.span(), values.span(), uris);
-
-    assert_eq!(collection.get_token_creator(TOKEN_ID_1), owner);
-    assert_eq!(collection.get_token_creator(TOKEN_ID_2), owner);
+    cheat_caller_address(collection.contract_address, OWNER(), CheatSpan::TargetCalls(1));
+    collection.add_supply(recipient, 999, VALUE_1);
 }
 
 #[test]
 #[should_panic(expected: 'Caller is not the owner')]
-fn test_batch_mint_item_not_owner() {
-    let owner = OWNER();
-    let (collection, _) = deploy_collection(owner, BASE_URI());
+fn test_add_supply_non_owner_reverts() {
+    let (collection, address) = deploy_collection(OWNER(), BASE_URI());
     let recipient = deploy_receiver();
-
-    let token_ids: Array<u256> = array![TOKEN_ID_1];
-    let values: Array<u256> = array![VALUE_1];
-    let uris: Array<ByteArray> = array![IPFS_URI()];
-
-    collection.batch_mint_item(recipient, token_ids.span(), values.span(), uris);
-}
-
-#[test]
-#[should_panic(expected: 'Recipient is zero address')]
-fn test_batch_mint_item_zero_recipient() {
-    let owner = OWNER();
-    let (collection, address) = deploy_collection(owner, BASE_URI());
-
-    let token_ids: Array<u256> = array![TOKEN_ID_1];
-    let values: Array<u256> = array![VALUE_1];
-    let uris: Array<ByteArray> = array![IPFS_URI()];
-
-    cheat_caller_address(address, owner, CheatSpan::TargetCalls(1));
-    collection.batch_mint_item(ZERO(), token_ids.span(), values.span(), uris);
-}
-
-#[test]
-#[should_panic(expected: 'Value must be > 0')]
-fn test_batch_mint_item_zero_value_rejected() {
-    let owner = OWNER();
-    let (collection, address) = deploy_collection(owner, BASE_URI());
-    let recipient = deploy_receiver();
-
-    let token_ids: Array<u256> = array![TOKEN_ID_1];
-    let values: Array<u256> = array![0]; // zero value
-    let uris: Array<ByteArray> = array![IPFS_URI()];
-
-    cheat_caller_address(address, owner, CheatSpan::TargetCalls(1));
-    collection.batch_mint_item(recipient, token_ids.span(), values.span(), uris);
-}
-
-#[test]
-#[should_panic(expected: 'Array length mismatch')]
-fn test_batch_mint_item_ids_values_mismatch() {
-    let owner = OWNER();
-    let (collection, address) = deploy_collection(owner, BASE_URI());
-    let recipient = deploy_receiver();
-
-    let token_ids: Array<u256> = array![TOKEN_ID_1, TOKEN_ID_2];
-    let values: Array<u256> = array![VALUE_1]; // shorter
-    let uris: Array<ByteArray> = array![IPFS_URI(), AR_URI()];
-
-    cheat_caller_address(address, owner, CheatSpan::TargetCalls(1));
-    collection.batch_mint_item(recipient, token_ids.span(), values.span(), uris);
-}
-
-#[test]
-#[should_panic(expected: 'Array length mismatch')]
-fn test_batch_mint_item_ids_uris_mismatch() {
-    let owner = OWNER();
-    let (collection, address) = deploy_collection(owner, BASE_URI());
-    let recipient = deploy_receiver();
-
-    let token_ids: Array<u256> = array![TOKEN_ID_1, TOKEN_ID_2];
-    let values: Array<u256> = array![VALUE_1, VALUE_2];
-    let uris: Array<ByteArray> = array![IPFS_URI()]; // shorter
-
-    cheat_caller_address(address, owner, CheatSpan::TargetCalls(1));
-    collection.batch_mint_item(recipient, token_ids.span(), values.span(), uris);
+    cheat_caller_address(address, OWNER(), CheatSpan::TargetCalls(1));
+    let id = collection.mint_edition(recipient, VALUE_1, IPFS_URI());
+    cheat_caller_address(address, USER1(), CheatSpan::TargetCalls(1));
+    collection.add_supply(recipient, id, VALUE_2);
 }
 
 // ─── Provenance query guards ───────────────────────────────────────────────────
@@ -616,7 +507,7 @@ fn test_transfer_between_receivers() {
     let receiver2 = deploy_receiver();
 
     cheat_caller_address(address, owner, CheatSpan::TargetCalls(1));
-    collection.mint_item(receiver1, TOKEN_ID_1, VALUE_1, IPFS_URI());
+    collection.mint_edition(receiver1, VALUE_1, IPFS_URI());
 
     let erc1155 = IERC1155Dispatcher { contract_address: address };
     cheat_caller_address(address, receiver1, CheatSpan::TargetCalls(1));
@@ -641,9 +532,9 @@ fn test_multiple_token_ids_independent_balances() {
     let recipient = deploy_receiver();
 
     cheat_caller_address(address, owner, CheatSpan::TargetCalls(1));
-    collection.mint_item(recipient, TOKEN_ID_1, VALUE_1, IPFS_URI());
+    collection.mint_edition(recipient, VALUE_1, IPFS_URI());
     cheat_caller_address(address, owner, CheatSpan::TargetCalls(1));
-    collection.mint_item(recipient, TOKEN_ID_2, VALUE_2, AR_URI());
+    collection.mint_edition(recipient, VALUE_2, AR_URI());
 
     let erc1155 = IERC1155Dispatcher { contract_address: address };
     assert_eq!(erc1155.balance_of(recipient, TOKEN_ID_1), VALUE_1);

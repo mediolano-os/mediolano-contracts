@@ -266,9 +266,10 @@ fn test_deployed_collection_can_mint() {
     let token_uri: ByteArray = "ipfs://QmDeployedCollectionToken";
 
     cheat_caller_address(collection_address, USER1(), CheatSpan::TargetCalls(1));
-    collection.mint_item(recipient, 1, 10, token_uri);
+    let token_id = collection.mint_edition(recipient, 10, token_uri);
 
     let erc1155 = IERC1155Dispatcher { contract_address: collection_address };
+    assert_eq!(token_id, 1);
     assert_eq!(erc1155.balance_of(recipient, 1), 10);
 }
 

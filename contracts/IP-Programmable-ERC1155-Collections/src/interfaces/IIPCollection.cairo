@@ -38,35 +38,9 @@ pub trait IIPCollection<TContractState> {
         token_uri: ByteArray,
     ) -> u256;
 
-    /// Mints `value` copies of a new or existing token type to `to`.
-    ///
-    /// Owner only. `to` must not be the zero address. `value` must be > 0.
-    /// For new token types (first mint of this `token_id`):
-    ///   - `token_uri` is stored permanently and must have a valid length.
-    ///   - The caller (owner) is recorded as the original IP creator.
-    ///   - Block timestamp is recorded as the registration date.
-    /// For existing token types (subsequent mints): `token_uri` is ignored.
-    fn mint_item(
-        ref self: TContractState,
-        to: ContractAddress,
-        token_id: u256,
-        value: u256,
-        token_uri: ByteArray,
-    );
-
-    /// Batch version of `mint_item`. All token IDs in the batch are minted to `to`.
-    ///
-    /// Owner only. `to` must not be the zero address.
-    /// `token_ids`, `values`, and `token_uris` must have equal length.
-    /// All `value` entries must be > 0.
-    /// For each token_id: URI is stored only on first mint of that type.
-    fn batch_mint_item(
-        ref self: TContractState,
-        to: ContractAddress,
-        token_ids: Span<u256>,
-        values: Span<u256>,
-        token_uris: Array<ByteArray>,
-    );
+    /// Mints `value` additional copies of an EXISTING edition to `to`.
+    /// Owner only. Reverts if `token_id` has never been minted. URI/provenance unchanged.
+    fn add_supply(ref self: TContractState, to: ContractAddress, token_id: u256, value: u256);
 
     // ── Provenance queries ─────────────────────────────────────────────────────
 

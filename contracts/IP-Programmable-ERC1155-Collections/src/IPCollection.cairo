@@ -106,7 +106,7 @@ pub mod IPCollection {
         IPMinted: IPMinted,
     }
 
-    /// Emitted on every mint_item call (single or via batch_mint_item).
+    /// Emitted on every mint (mint_edition, batch_mint_edition, add_supply).
     /// `token_id` and `recipient` are indexed for efficient indexer filtering.
     #[derive(Drop, starknet::Event)]
     pub struct IPMinted {
@@ -208,44 +208,24 @@ pub mod IPCollection {
             token_id
         }
 
-        fn mint_item(
-            ref self: ContractState,
-            to: ContractAddress,
-            token_id: u256,
-            value: u256,
-            token_uri: ByteArray,
+        fn add_supply(
+            ref self: ContractState, to: ContractAddress, token_id: u256, value: u256,
         ) {
             self.ownable.assert_only_owner();
             assert(!to.is_zero(), 'Recipient is zero address');
             assert(value > 0, 'Value must be > 0');
-
-            let creator = get_caller_address();
-            self._mint_single(creator, to, token_id, value, token_uri);
-        }
-
-        fn batch_mint_item(
-            ref self: ContractState,
-            to: ContractAddress,
-            token_ids: Span<u256>,
-            values: Span<u256>,
-            token_uris: Array<ByteArray>,
-        ) {
-            self.ownable.assert_only_owner();
-            assert(!to.is_zero(), 'Recipient is zero address');
-            assert(token_ids.len() == values.len(), 'Array length mismatch');
-            assert(token_ids.len() == token_uris.len(), 'Array length mismatch');
-
-            let creator = get_caller_address();
-            for i in 0..token_ids.len() {
-                self
-                    ._mint_single(
+            let creator = self.token_creators.read(token_id);
+            assert(creator.is_non_zero(), 'Token does not exist');
+            self.erc1155.mint_with_acceptance_check(to, token_id, value, array![].span());
+            self
+                .emit(
+                    IPMinted {
+                        token_id, recipient: to, value,
+                        uri: self.token_uris.read(token_id),
                         creator,
-                        to,
-                        *token_ids.at(i),
-                        *values.at(i),
-                        token_uris.at(i).clone(),
-                    );
-            }
+                        registered_at: self.token_registered_at.read(token_id),
+                    },
+                );
         }
 
         // ── Provenance queries ─────────────────────────────────────────────────
@@ -307,63 +287,6 @@ pub mod IPCollection {
                     IPMinted {
                         token_id, recipient: to, value, uri: token_uri,
                         creator, registered_at: timestamp,
-                    },
-                );
-        }
-
-        /// Mints a single token type, recording immutable IP provenance on first mint.
-        ///
-        /// `creator` is the caller (collection owner) — the IP author under the Berne Convention.
-        /// `to` is the recipient who receives the minted supply (may differ from creator).
-        /// `value` must be > 0.
-        fn _mint_single(
-            ref self: ContractState,
-            creator: ContractAddress,
-            to: ContractAddress,
-            token_id: u256,
-            value: u256,
-            token_uri: ByteArray,
-        ) {
-            assert(value > 0, 'Value must be > 0');
-
-            let is_new = self.token_creators.read(token_id).is_zero();
-            let timestamp = get_block_timestamp();
-
-            if is_new {
-                // Keep URI storage protocol-neutral so future metadata systems work without
-                // redeploying the collection implementation.
-                assert(
-                    token_uri.len() > 0 && token_uri.len() <= MAX_TOKEN_URI_LEN,
-                    'Invalid URI length',
-                );
-
-                self.token_uris.write(token_id, token_uri.clone());
-                self.token_creators.write(token_id, creator);
-                self.token_registered_at.write(token_id, timestamp);
-            }
-
-            self.erc1155.mint_with_acceptance_check(to, token_id, value, array![].span());
-
-            // Use local vars on first mint to avoid reading back what we just wrote.
-            let (event_creator, registered_at, uri) = if is_new {
-                (creator, timestamp, token_uri)
-            } else {
-                (
-                    self.token_creators.read(token_id),
-                    self.token_registered_at.read(token_id),
-                    self.token_uris.read(token_id),
-                )
-            };
-
-            self
-                .emit(
-                    IPMinted {
-                        token_id,
-                        recipient: to,
-                        value,
-                        uri,
-                        creator: event_creator,
-                        registered_at,
                     },
                 );
         }

@@ -1,31 +1,20 @@
 // DESIGN: IPCollectionFactory is the single deploy point for all IPCollection contracts.
 // Anyone can deploy a new collection — the caller becomes its owner and IP creator.
-// The factory owner can update the class hash for future deployments without affecting
-// already-deployed collections (which are immutable standalone contracts).
+// The factory is fully immutable and ownerless: the collection class hash is fixed at
+// deploy time. Protocol evolution = deploy a new factory, never mutate this one.
 
 #[starknet::contract]
 pub mod IPCollectionFactory {
-    use openzeppelin::access::ownable::OwnableComponent;
+    use core::hash::{HashStateExTrait, HashStateTrait};
+    use core::poseidon::PoseidonTrait;
     use starknet::storage::{StoragePointerReadAccess, StoragePointerWriteAccess};
     use starknet::syscalls::deploy_syscall;
-    use starknet::{ClassHash, ContractAddress, get_caller_address, SyscallResultTrait};
-    use core::num::traits::Zero;
-    use core::poseidon::PoseidonTrait;
-    use core::hash::{HashStateTrait, HashStateExTrait};
+    use starknet::{ClassHash, ContractAddress, SyscallResultTrait, get_caller_address};
     use crate::interfaces::IIPCollectionFactory::IIPCollectionFactory;
-
-    component!(path: OwnableComponent, storage: ownable, event: OwnableEvent);
-
-    #[abi(embed_v0)]
-    impl OwnableMixinImpl = OwnableComponent::OwnableMixinImpl<ContractState>;
-    impl OwnableInternalImpl = OwnableComponent::InternalImpl<ContractState>;
 
     #[storage]
     struct Storage {
-        #[substorage(v0)]
-        ownable: OwnableComponent::Storage,
-        /// Class hash used to deploy new IPCollection instances.
-        /// Updatable by factory owner for protocol upgrades; existing collections unaffected.
+        /// Class hash used to deploy new IPCollection instances. Immutable — fixed at deploy.
         ip_collection_class_hash: ClassHash,
         /// Monotonically incrementing nonce for unique deploy salts.
         deploy_nonce: felt252,
@@ -34,10 +23,7 @@ pub mod IPCollectionFactory {
     #[event]
     #[derive(Drop, starknet::Event)]
     pub enum Event {
-        #[flat]
-        OwnableEvent: OwnableComponent::Event,
         CollectionDeployed: CollectionDeployed,
-        CollectionClassHashUpdated: CollectionClassHashUpdated,
     }
 
     /// Emitted each time a new IPCollection is deployed via `deploy_collection`.
@@ -52,27 +38,14 @@ pub mod IPCollectionFactory {
         pub base_uri: ByteArray,
     }
 
-    /// Emitted when the factory owner updates the class hash used for future deployments.
-    #[derive(Drop, starknet::Event)]
-    pub struct CollectionClassHashUpdated {
-        pub previous_class_hash: ClassHash,
-        pub new_class_hash: ClassHash,
-    }
-
     /// Deploys a new IPCollectionFactory.
     ///
     /// # Arguments
-    /// * `owner`                 - Address that owns the factory (can update class hash)
-    /// * `collection_class_hash` - Class hash of the IPCollection contract to deploy
+    /// * `collection_class_hash` - Class hash of the IPCollection contract to deploy.
+    ///   Fixed forever; the factory is ownerless and immutable.
     #[constructor]
-    fn constructor(
-        ref self: ContractState,
-        owner: ContractAddress,
-        collection_class_hash: ClassHash,
-    ) {
-        assert(!owner.is_zero(), 'Owner is zero address');
+    fn constructor(ref self: ContractState, collection_class_hash: ClassHash) {
         assert(collection_class_hash.into() != 0_felt252, 'Class hash is zero');
-        self.ownable.initializer(owner);
         self.ip_collection_class_hash.write(collection_class_hash);
         // deploy_nonce defaults to 0 — no explicit write needed
     }
@@ -84,29 +57,11 @@ pub mod IPCollectionFactory {
         }
 
         fn version(self: @ContractState) -> ByteArray {
-            "0.2.0"
-        }
-
-        fn update_collection_class_hash(ref self: ContractState, new_class_hash: ClassHash) {
-            self.ownable.assert_only_owner();
-            assert(new_class_hash.into() != 0_felt252, 'Class hash is zero');
-
-            let previous_class_hash = self.ip_collection_class_hash.read();
-            self.ip_collection_class_hash.write(new_class_hash);
-            self
-                .emit(
-                    CollectionClassHashUpdated {
-                        previous_class_hash,
-                        new_class_hash,
-                    },
-                );
+            "0.3.0"
         }
 
         fn deploy_collection(
-            ref self: ContractState,
-            name: ByteArray,
-            symbol: ByteArray,
-            base_uri: ByteArray,
+            ref self: ContractState, name: ByteArray, symbol: ByteArray, base_uri: ByteArray,
         ) -> ContractAddress {
             assert(name.len() > 0, 'Name must not be empty');
             assert(symbol.len() > 0, 'Symbol must not be empty');

@@ -1,25 +1,25 @@
+use ip_programmable_erc1155_collections::IPCollection::IPCollection::{Event, IPMinted};
 use ip_programmable_erc1155_collections::interfaces::IIPCollection::{
     IIPCollectionDispatcher, IIPCollectionDispatcherTrait,
 };
-use ip_programmable_erc1155_collections::IPCollection::IPCollection::{Event, IPMinted};
+use openzeppelin::access::ownable::interface::{IOwnableDispatcher, IOwnableDispatcherTrait};
+use openzeppelin::introspection::interface::{ISRC5Dispatcher, ISRC5DispatcherTrait};
+use openzeppelin::token::common::erc2981::interface::{
+    IERC2981AdminDispatcher, IERC2981AdminDispatcherTrait, IERC2981Dispatcher,
+    IERC2981DispatcherTrait, IERC2981InfoDispatcher, IERC2981InfoDispatcherTrait, IERC2981_ID,
+};
 use openzeppelin::token::erc1155::interface::{
     IERC1155Dispatcher, IERC1155DispatcherTrait, IERC1155MetadataURIDispatcher,
     IERC1155MetadataURIDispatcherTrait,
 };
-use openzeppelin::access::ownable::interface::{IOwnableDispatcher, IOwnableDispatcherTrait};
-use openzeppelin::token::common::erc2981::interface::{
-    IERC2981Dispatcher, IERC2981DispatcherTrait, IERC2981AdminDispatcher,
-    IERC2981AdminDispatcherTrait, IERC2981InfoDispatcher, IERC2981InfoDispatcherTrait,
-};
-use openzeppelin::introspection::interface::{ISRC5Dispatcher, ISRC5DispatcherTrait};
-use openzeppelin::token::common::erc2981::interface::IERC2981_ID;
 use snforge_std::{
     CheatSpan, ContractClassTrait, DeclareResultTrait, EventSpyAssertionsTrait,
     cheat_block_timestamp, cheat_caller_address, declare, spy_events,
 };
 use starknet::ContractAddress;
 
-// ─── Constants ─────────────────────────────────────────────────────────────────
+// ─── Constants
+// ─────────────────────────────────────────────────────────────────
 
 fn OWNER() -> ContractAddress {
     0x100.try_into().unwrap()
@@ -56,7 +56,7 @@ fn LONG_URI() -> ByteArray {
     let mut uri: ByteArray = "";
     for _ in 0_u32..2049_u32 {
         uri.append_byte(97_u8);
-    };
+    }
     uri
 }
 fn BASE_URI() -> ByteArray {
@@ -70,7 +70,8 @@ const VALUE_1: u256 = 10;
 const VALUE_2: u256 = 5;
 const VALUE_3: u256 = 1;
 
-// ─── Helpers ───────────────────────────────────────────────────────────────────
+// ─── Helpers
+// ───────────────────────────────────────────────────────────────────
 
 /// Deploy a fresh ERC1155Receiver mock (used as minting recipient).
 fn deploy_receiver() -> ContractAddress {
@@ -101,7 +102,8 @@ fn deploy_collection(
     (dispatcher, address)
 }
 
-// ─── Constructor / metadata ────────────────────────────────────────────────────
+// ─── Constructor / metadata
+// ────────────────────────────────────────────────────
 
 #[test]
 fn test_constructor_owner() {
@@ -150,10 +152,11 @@ fn test_constructor_empty_base_uri() {
 fn test_contract_version() {
     let owner = OWNER();
     let (collection, _) = deploy_collection(owner, BASE_URI());
-    assert_eq!(collection.version(), "0.2.0");
+    assert_eq!(collection.version(), "0.3.0");
 }
 
-// ─── uri() fallback behaviour ──────────────────────────────────────────────────
+// ─── uri() fallback behaviour
+// ──────────────────────────────────────────────────
 
 #[test]
 fn test_uri_unminted_falls_back_to_base_uri() {
@@ -186,7 +189,8 @@ fn test_uri_minted_token_returns_per_token_uri() {
     assert_eq!(metadata.uri(TOKEN_ID_1), IPFS_URI());
 }
 
-// ─── mint_item ─────────────────────────────────────────────────────────────────
+// ─── mint_item
+// ─────────────────────────────────────────────────────────────────
 
 #[test]
 fn test_mint_item_ipfs_uri() {
@@ -413,7 +417,8 @@ fn test_total_editions_and_token_exists() {
     assert!(!collection.token_exists(3));
 }
 
-// ─── batch_mint_edition ──────────────────────────────────────────────────────────
+// ─── batch_mint_edition
+// ──────────────────────────────────────────────────────────
 
 #[test]
 fn test_batch_mint_edition_sequential() {
@@ -439,7 +444,10 @@ fn test_batch_then_single_continues_sequence() {
     let (collection, _) = deploy_collection(OWNER(), BASE_URI());
     let recipient = deploy_receiver();
     cheat_caller_address(collection.contract_address, OWNER(), CheatSpan::TargetCalls(2));
-    collection.batch_mint_edition(recipient, array![VALUE_1, VALUE_1].span(), array![IPFS_URI(), AR_URI()]);
+    collection
+        .batch_mint_edition(
+            recipient, array![VALUE_1, VALUE_1].span(), array![IPFS_URI(), AR_URI()],
+        );
     let next = collection.mint_edition(recipient, VALUE_1, HTTP_URI());
     assert_eq!(next, 3);
 }
@@ -470,7 +478,8 @@ fn test_batch_mint_edition_not_owner() {
     collection.batch_mint_edition(recipient, array![VALUE_1].span(), array![IPFS_URI()]);
 }
 
-// ─── add_supply (re-supply an existing edition) ──────────────────────────────────
+// ─── add_supply (re-supply an existing edition)
+// ──────────────────────────────────
 
 #[test]
 fn test_remint_existing_token_increases_balance() {
@@ -543,7 +552,8 @@ fn test_add_supply_non_owner_reverts() {
     collection.add_supply(recipient, id, VALUE_2);
 }
 
-// ─── Provenance query guards ───────────────────────────────────────────────────
+// ─── Provenance query guards
+// ───────────────────────────────────────────────────
 
 #[test]
 #[should_panic(expected: 'Token does not exist')]
@@ -569,7 +579,8 @@ fn test_get_token_data_nonexistent() {
     collection.get_token_data(TOKEN_ID_1);
 }
 
-// ─── ERC-1155 standard behaviour ──────────────────────────────────────────────
+// ─── ERC-1155 standard behaviour
+// ──────────────────────────────────────────────
 
 #[test]
 fn test_transfer_between_receivers() {
@@ -614,7 +625,8 @@ fn test_multiple_token_ids_independent_balances() {
     assert_eq!(erc1155.balance_of(recipient, TOKEN_ID_3), 0);
 }
 
-// ─── ERC-2981 royalty ──────────────────────────────────────────────────────────
+// ─── ERC-2981 royalty
+// ──────────────────────────────────────────────────────────
 
 #[test]
 fn test_royalty_default_is_zero_on_deploy() {
@@ -754,7 +766,8 @@ fn test_default_royalty_info_returns_denominator() {
     assert_eq!(denominator, 10_000);
 }
 
-// ─── mint_edition (on-chain sequential ids) ──────────────────────────────────────
+// ─── mint_edition (on-chain sequential ids)
+// ──────────────────────────────────────
 
 #[test]
 fn test_mint_edition_assigns_sequential_ids() {

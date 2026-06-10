@@ -9,7 +9,8 @@ use crate::types::TokenData;
 /// at first mint of each token type, satisfying the Berne Convention authorship standard.
 #[starknet::interface]
 pub trait IIPCollection<TContractState> {
-    // ── Collection metadata ────────────────────────────────────────────────────
+    // ── Collection metadata
+    // ────────────────────────────────────────────────────
 
     /// Human-readable collection name set at deploy time.
     fn name(self: @TContractState) -> ByteArray;
@@ -25,17 +26,15 @@ pub trait IIPCollection<TContractState> {
     /// Returns the immutable implementation version for this deployed collection class.
     fn version(self: @TContractState) -> ByteArray;
 
-    // ── Minting ────────────────────────────────────────────────────────────────
+    // ── Minting
+    // ────────────────────────────────────────────────────────────────
 
     /// Mints a NEW edition with an id assigned atomically on-chain (sequential from 1).
     /// Owner only. `to` must not be zero; `value` must be > 0; `token_uri` must be valid length.
     /// Records the caller as the immutable IP creator + registration timestamp.
     /// Returns the assigned token id.
     fn mint_edition(
-        ref self: TContractState,
-        to: ContractAddress,
-        value: u256,
-        token_uri: ByteArray,
+        ref self: TContractState, to: ContractAddress, value: u256, token_uri: ByteArray,
     ) -> u256;
 
     /// Mints N new editions in one call; ids are assigned sequentially. Owner only.
@@ -51,7 +50,8 @@ pub trait IIPCollection<TContractState> {
     /// Owner only. Reverts if `token_id` has never been minted. URI/provenance unchanged.
     fn add_supply(ref self: TContractState, to: ContractAddress, token_id: u256, value: u256);
 
-    // ── Provenance queries ─────────────────────────────────────────────────────
+    // ── Provenance queries
+    // ─────────────────────────────────────────────────────
 
     /// Returns the address that deployed this collection via the factory.
     /// Immutable — does not change if ownership is transferred.

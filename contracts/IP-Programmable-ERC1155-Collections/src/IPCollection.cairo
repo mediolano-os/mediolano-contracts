@@ -17,20 +17,19 @@
 
 #[starknet::contract]
 pub mod IPCollection {
-    use openzeppelin::introspection::src5::SRC5Component;
-    use openzeppelin::access::ownable::OwnableComponent;
-    use openzeppelin::token::erc1155::ERC1155Component;
-    use openzeppelin::token::erc1155::ERC1155HooksEmptyImpl;
-    use openzeppelin::token::erc1155::interface::IERC1155MetadataURI;
-    use openzeppelin::token::common::erc2981::{ERC2981Component, DefaultConfig};
-    use starknet::storage::{
-        Map, StoragePointerReadAccess, StoragePointerWriteAccess, StorageMapReadAccess,
-        StorageMapWriteAccess,
-    };
     use core::num::traits::Zero;
+    use openzeppelin::access::ownable::OwnableComponent;
+    use openzeppelin::introspection::src5::SRC5Component;
+    use openzeppelin::token::common::erc2981::{DefaultConfig, ERC2981Component};
+    use openzeppelin::token::erc1155::interface::IERC1155MetadataURI;
+    use openzeppelin::token::erc1155::{ERC1155Component, ERC1155HooksEmptyImpl};
+    use starknet::storage::{
+        Map, StorageMapReadAccess, StorageMapWriteAccess, StoragePointerReadAccess,
+        StoragePointerWriteAccess,
+    };
     use starknet::{ContractAddress, get_block_timestamp, get_caller_address};
     use crate::interfaces::IIPCollection::IIPCollection;
-    use crate::types::{TokenData, MAX_TOKEN_URI_LEN};
+    use crate::types::{MAX_TOKEN_URI_LEN, TokenData};
 
     component!(path: SRC5Component, storage: src5, event: SRC5Event);
     component!(path: OwnableComponent, storage: ownable, event: OwnableEvent);
@@ -59,7 +58,8 @@ pub mod IPCollection {
     #[abi(embed_v0)]
     impl ERC2981InfoImpl = ERC2981Component::ERC2981InfoImpl<ContractState>;
     #[abi(embed_v0)]
-    impl ERC2981AdminOwnableImpl = ERC2981Component::ERC2981AdminOwnableImpl<ContractState>;
+    impl ERC2981AdminOwnableImpl =
+        ERC2981Component::ERC2981AdminOwnableImpl<ContractState>;
     impl ERC2981InternalImpl = ERC2981Component::InternalImpl<ContractState>;
 
     #[storage]
@@ -147,7 +147,8 @@ pub mod IPCollection {
         self.collection_base_uri.write(base_uri);
         self.collection_creator.write(owner);
         // Initialize ERC-2981 with 0% royalty pointing to owner.
-        // Owner can activate royalties post-deploy via set_default_royalty(receiver, fee_numerator).
+        // Owner can activate royalties post-deploy via set_default_royalty(receiver,
+        // fee_numerator).
         self.erc2981.initializer(owner, 0);
         // Editions are numbered from 1.
         self.next_token_id.write(1);
@@ -174,7 +175,8 @@ pub mod IPCollection {
 
     #[abi(embed_v0)]
     impl IPCollectionImpl of IIPCollection<ContractState> {
-        // ── Collection metadata ────────────────────────────────────────────────
+        // ── Collection metadata
+        // ────────────────────────────────────────────────
 
         fn name(self: @ContractState) -> ByteArray {
             self.collection_name.read()
@@ -189,16 +191,14 @@ pub mod IPCollection {
         }
 
         fn version(self: @ContractState) -> ByteArray {
-            "0.2.0"
+            "0.3.0"
         }
 
-        // ── Minting ────────────────────────────────────────────────────────────
+        // ── Minting
+        // ────────────────────────────────────────────────────────────
 
         fn mint_edition(
-            ref self: ContractState,
-            to: ContractAddress,
-            value: u256,
-            token_uri: ByteArray,
+            ref self: ContractState, to: ContractAddress, value: u256, token_uri: ByteArray,
         ) -> u256 {
             self.ownable.assert_only_owner();
             assert(!to.is_zero(), 'Recipient is zero address');
@@ -229,9 +229,7 @@ pub mod IPCollection {
             ids.span()
         }
 
-        fn add_supply(
-            ref self: ContractState, to: ContractAddress, token_id: u256, value: u256,
-        ) {
+        fn add_supply(ref self: ContractState, to: ContractAddress, token_id: u256, value: u256) {
             self.ownable.assert_only_owner();
             assert(!to.is_zero(), 'Recipient is zero address');
             assert(value > 0, 'Value must be > 0');
@@ -241,7 +239,9 @@ pub mod IPCollection {
             self
                 .emit(
                     IPMinted {
-                        token_id, recipient: to, value,
+                        token_id,
+                        recipient: to,
+                        value,
                         uri: self.token_uris.read(token_id),
                         creator,
                         registered_at: self.token_registered_at.read(token_id),
@@ -249,7 +249,8 @@ pub mod IPCollection {
                 );
         }
 
-        // ── Provenance queries ─────────────────────────────────────────────────
+        // ── Provenance queries
+        // ─────────────────────────────────────────────────
 
         fn get_collection_creator(self: @ContractState) -> ContractAddress {
             self.collection_creator.read()
@@ -303,8 +304,7 @@ pub mod IPCollection {
         ) {
             assert(value > 0, 'Value must be > 0');
             assert(
-                token_uri.len() > 0 && token_uri.len() <= MAX_TOKEN_URI_LEN,
-                'Invalid URI length',
+                token_uri.len() > 0 && token_uri.len() <= MAX_TOKEN_URI_LEN, 'Invalid URI length',
             );
             let timestamp = get_block_timestamp();
             self.token_uris.write(token_id, token_uri.clone());
@@ -314,11 +314,14 @@ pub mod IPCollection {
             self
                 .emit(
                     IPMinted {
-                        token_id, recipient: to, value, uri: token_uri,
-                        creator, registered_at: timestamp,
+                        token_id,
+                        recipient: to,
+                        value,
+                        uri: token_uri,
+                        creator,
+                        registered_at: timestamp,
                     },
                 );
         }
-
     }
 }

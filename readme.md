@@ -68,13 +68,9 @@ The protocol should be legible to software, not only to humans. Services should 
 
 ## Repository Map
 
-Contracts marked **v2, audited** have been redesigned one-by-one against the
-[redesign conventions](docs/REDESIGN_CONVENTIONS.md) — ownerless and
-permissionless, zero-fee, checks-effects-interactions, minimal storage — with
-a findings table in each package's `AUDIT_REPORT.md` and a per-package
-`README.md`. Every pull request that touches a contract directory is built
-and tested by CI. Unmarked packages predate the conventions and are queued
-for the same treatment; treat them as prototypes until their redesign lands.
+Every pull request that touches a contract directory is built and tested by
+CI. Each reviewed package carries its own `README.md` describing exactly what
+the contract does and enforces.
 
 Each contract package is self-contained and has its own `Scarb.toml`. Some packages are deployed and production-oriented; others are prototypes or pre-production service experiments. Treat each package README as the authority for its current status.
 
@@ -86,7 +82,7 @@ Each contract package is self-contained and has its own `Scarb.toml`. Some packa
 | `contracts/IP-Programmable-ERC1155-Collections` | Immutable ERC-1155 collection factory for edition-style IP assets. |
 | `contracts/IP-Programmable-ERC-721` | Standalone permissionless ERC-721 IP collection contract. |
 | `contracts/IP-collection-ERC-721` | Owner-minted ERC-721 collection for canonical issuer-controlled IP assets. |
-| `contracts/IP-Programmable-ERC-1155` | Legacy/prototype ERC-1155 IP contract. Use the collection-based ERC-1155 package for production-oriented work. |
+| `contracts/IP-Programmable-ERC-1155` | Prototype ERC-1155 IP contract. Use the collection-based ERC-1155 package for production-oriented work. |
 | `contracts/MIP-IP-Factory-ERC721` | Factory-oriented ERC-721 IP issuance package. |
 | `contracts/MIP-Openedition-ERC721a` | Open-edition ERC-721 issuance package. |
 | `contracts/IP-Bulk-Tokenization` | Batch IP tokenization flow for multiple ERC-721 mints. |
@@ -122,15 +118,15 @@ Each contract package is self-contained and has its own `Scarb.toml`. Some packa
 
 | Package | Purpose |
 | --- | --- |
-| `contracts/IP-Club` | **v2, audited.** Permissionless club factory deploying non-transferable ERC-721 membership passes; member exit (leave/burn), reversible close, direct creator entry fees. |
-| `contracts/IP-Subscription` | **v2, audited.** Permissionless, ownerless time-bound subscription plans; paid time is inviolable, payments flow directly to the plan recipient. |
-| `contracts/IP-Tickets` | **v2, audited.** Permissionless ERC-721 ticket series with redemption, creator sales switch, and ERC-2981 royalty discovery. |
+| `contracts/IP-Club` | Permissionless club factory deploying non-transferable ERC-721 membership passes; member exit (leave/burn), reversible close, direct creator entry fees. |
+| `contracts/IP-Subscription` | Permissionless, ownerless time-bound subscription plans; paid time is inviolable, payments flow directly to the plan recipient. |
+| `contracts/IP-Tickets` | Permissionless ERC-721 ticket series with redemption, creator sales switch, and ERC-2981 royalty discovery. |
 | `contracts/IP-Drop` | Drop and claim flow. |
 | `contracts/IP-Airdrop` | Merkle-based airdrop flow. |
 | `contracts/IP-Launchpad` | Launchpad service primitives. |
 | `contracts/IP-Crowfunding` | Crowdfunding package. |
-| `contracts/IP-Sponsorhip` | **v2, audited.** Sponsorship licenses on ERC-721 IP assets: allowance-based direct settlement (no escrow), no admin, irrevocable time-bound licenses. |
-| `contracts/IP-Time-Capsule` | **v2, audited.** Time-locked IP disclosure: commitment-first privacy (encrypted pointer + Poseidon commitment), reveal after unlock. |
+| `contracts/IP-Sponsorhip` | Sponsorship licenses on ERC-721 IP assets: allowance-based direct settlement (no escrow), no admin, irrevocable time-bound licenses. |
+| `contracts/IP-Time-Capsule` | Time-locked IP disclosure: commitment-first privacy (encrypted pointer + Poseidon commitment), reveal after unlock. |
 | `contracts/IP-Story` | Story and narrative IP package. |
 
 ### Marketplace And Transaction Services
@@ -159,7 +155,7 @@ Several service packages are pre-production or prototypes and say so in their lo
 
 ## Contract Design Rules
 
-New and redesigned packages should follow these rules:
+All packages should follow these rules:
 
 - Keep protocol authority on-chain.
 - Keep tokenization and protection primitives zero-fee.
@@ -295,7 +291,7 @@ sncast --profile <profile> --wait deploy \
 Before mainnet deployment:
 
 - Confirm the package is production-ready.
-- Read the local README and any audit or report files.
+- Read the local README.
 - Run the test suite.
 - Validate constructor calldata.
 - Rehearse on testnet or a local fork.
@@ -314,7 +310,7 @@ Mediolano contracts favor small, inspectable invariants:
 - Non-transferable or restricted behavior only when the service semantics require it.
 - No hidden platform authority inside protocol contracts.
 
-Security status varies by package. Some packages are audited or have deployment reports; others are prototypes without complete tests. Do not infer production readiness from the repository root.
+Security status varies by package; some are mature with full test suites, others are prototypes. Do not infer production readiness from the repository root — read each package's README.
 
 ## Contributing
 

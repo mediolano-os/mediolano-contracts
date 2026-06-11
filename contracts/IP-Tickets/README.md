@@ -4,25 +4,24 @@
 
 Tickets are indexable and transferable ERC-721 assets. Access follows current ownership until the ticket expires or is redeemed.
 
-## Design (v2, 2026-06-10)
+## Design
 
-The v2 redesign tightens the contract against the Mediolano principles:
+The contract follows the Mediolano principles:
 
-- **Still permissionless and ownerless** (as in v1): anyone creates a series;
+- **Permissionless and ownerless**: anyone creates a series;
   the contract has no admin, no upgrade path, and takes no fee. Payments flow
   directly from buyer to the series creator.
 - **Creator sales switch.** `set_series_active(series_id, active)` (series
   creator only) gates **minting only** — existing tickets keep their access,
-  stay transferable, and stay redeemable. Mirrors IP-Subscription v2: a
-  creator can stop new money (cancelled event), never confiscate sold assets.
-- **CEI instead of a lock.** Series/token state is final before the payment
-  transfer and `safe_mint`; the manual reentrancy lock is removed. A reentrant
-  call runs under its own caller context against consistent storage.
+  stay transferable, and stay redeemable. A creator can stop new money (e.g. a cancelled event), never confiscate
+  sold assets.
+- **Checks-effects-interactions.** Series/token state is final before the
+  payment transfer and `safe_mint`; a reentrant call runs under its own
+  caller context against consistent storage.
 - **Royalty discovery.** The ERC-2981 interface ID is registered via SRC5 and
-  `royalty_info` is exposed in snake_case alongside the legacy `royaltyInfo`.
-- **Leaner records.** `TicketSeries` drops its redundant `id`/`exists` fields
-  (existence is `creator != 0`); the wasted `redeemed=false` write on mint is
-  gone.
+  `royalty_info` is exposed in snake_case alongside the camelCase `royaltyInfo` alias.
+- **Lean records.** Series existence derives from `creator != 0`; storage
+  holds only what the contract enforces.
 
 ## Service Asset Declaration
 
@@ -37,7 +36,7 @@ This service follows the shared doctrine in [`docs/SERVICE_ASSET_DOCTRINE.md`](.
 | `access_semantics` | Current ownership of at least one unredeemed, unexpired ticket in a series |
 | `marketplace_visibility` | Display and list as ERC721 tickets |
 | `metadata_uri_policy` | `ipfs://` or `ar://` |
-| `src5_interface_id` | `IIP_TICKET_SERVICE_ID` (`starknet_keccak("mediolano.ip-tickets.v2")`) + `IERC2981_ID` |
+| `src5_interface_id` | `IIP_TICKET_SERVICE_ID` + `IERC2981_ID` |
 
 ## Features
 
@@ -121,4 +120,4 @@ Tested baseline:
 
 ## Status
 
-This package has been redesigned from the legacy prototype. It is still pre-production until it receives external security review and deployment rehearsal.
+Pre-production until external security review and deployment rehearsal.

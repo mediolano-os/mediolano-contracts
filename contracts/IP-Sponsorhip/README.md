@@ -5,12 +5,7 @@ time-bound sponsorship licenses on ERC-721 IP assets. An IP owner creates an
 offer on an asset they hold; sponsors place bids; the owner accepts one;
 payment settles sponsor → author directly and a license record is issued.
 
-## Design (v2, 2026-06-11)
-
-v2 is a full rewrite — the legacy contract collected no payment, carried a
-contract admin who could deactivate any IP, let authors revoke paid licenses,
-and kept a parallel mini-IP-registry with mutable `felt252` metadata. The v2
-shape, per `docs/REDESIGN_CONVENTIONS.md`:
+## Design
 
 - **The asset layer is the registry.** There is no internal IP registry: an
   offer references `(nft_contract, token_id)` and the contract verifies
@@ -32,8 +27,7 @@ shape, per `docs/REDESIGN_CONVENTIONS.md`:
   acceptance, reversibly.
 - **Minimal storage.** One standing bid per `(offer, sponsor)` in a map —
   rebids overwrite, history lives in keyed events. No enumerable bid lists,
-  user lists, or active-offer lists on-chain (the legacy Vec-rewrite loops
-  were an unbounded-gas griefing surface aimed at the accept path).
+  user lists, or active-offer lists on-chain.
 
 ## Service Asset Declaration
 
@@ -49,7 +43,7 @@ This service follows the shared doctrine in
 | `access_semantics` | `is_license_valid(license_id)` derives validity from expiry |
 | `marketplace_visibility` | Offer/license visibility via keyed events; no asset listing |
 | `metadata_uri_policy` | `ipfs://` or `ar://` for license terms |
-| `src5_interface_id` | `IIP_SPONSORSHIP_ID` (`starknet_keccak("mediolano.ip-sponsorship.v2")`) |
+| `src5_interface_id` | `IIP_SPONSORSHIP_ID` |
 
 If the license becomes asset-backed later, it should be designed explicitly
 as a transferable ERC-721 license token; today it is deliberately a record.

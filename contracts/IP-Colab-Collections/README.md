@@ -2,7 +2,7 @@
 
 Collaborative ERC-721 IP collection for Starknet/Cairo.
 
-This package has been redesigned from the legacy contribution ledger into a MIP-style collaborative NFT collection. The old code treated minting as an event-only flag; the current contract deploys a backing `IPNft` ERC-721 contract, stores full content-addressed metadata URIs, and mints actual transferable NFTs to approved contributors.
+This package is a MIP-style collaborative NFT collection. The contract deploys a backing `IPNft` ERC-721 contract, stores full content-addressed metadata URIs, and mints actual transferable NFTs to approved contributors.
 
 ## Design Summary
 

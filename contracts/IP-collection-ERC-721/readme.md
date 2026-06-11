@@ -8,9 +8,9 @@ It is distinct from `IP-Programmable-ERC-721`, which is a shared permissionless 
 
 ## Status
 
-Rebuilt from the legacy `IP-collection-ERC-721` implementation on 2026-05-23.
+Rebuilt on 2026-05-23.
 
-The legacy contract was replaced rather than patched. The rebuilt version:
+The previous implementation was replaced rather than patched. This version:
 
 - Uses OpenZeppelin ERC-721, ERC-721 Enumerable, SRC5, and Ownable components.
 - Allows only the current owner to mint.

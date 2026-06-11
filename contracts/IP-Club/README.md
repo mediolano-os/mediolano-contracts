@@ -15,29 +15,26 @@ The protocol is designed as a public-good primitive:
 - `safe_mint` membership issuance to prevent locked NFTs.
 - No upgrade path in the manager contract.
 
-## Design (v2, 2026-06-11)
-
-The v2 redesign (findings in `AUDIT_REPORT.md`) adds member exit sovereignty
-and applies the catalog-wide conventions (`docs/REDESIGN_CONVENTIONS.md`):
+## Design
 
 - **Members can leave.** `leave_club(club_id, token_id)` burns the caller's
   own membership NFT and frees the seat. Exit is always allowed — open or
   closed club — and the entry fee is not refunded (it flowed to the creator
   at join time). Nobody is kept on a public on-chain roster against their
   will.
-- **Closure is reversible.** `close_club` is replaced by
-  `set_club_open(club_id, open)` — creator-only, gating **new joins only**.
-  Existing memberships and the right to leave are never affected.
-- **CEI instead of a lock.** Club state is final before the fee transfer and
-  the membership mint; the `join_locked` flag is removed. A reentrant payment
-  token runs under its own caller context and the transaction reverts
-  atomically (tested with a single-reentry mock).
-- **Leaner records.** `ClubRecord` drops `id`, `name`, `symbol`,
-  `metadata_uri` (the club's NFT contract is the source of truth for asset
-  metadata), and the three-state `ClubStatus` enum (existence ⇔
+- **Closure is reversible.** `set_club_open(club_id, open)` — creator-only,
+  gating **new joins only**. Existing memberships and the right to leave are
+  never affected.
+- **Checks-effects-interactions.** Club state is final before the fee
+  transfer and the membership mint; a reentrant payment token runs under its
+  own caller context and the transaction reverts atomically (tested with a
+  single-reentry mock).
+- **Lean records.** The club's NFT contract is the source of truth for asset
+  metadata; the registry record holds only what it enforces (existence ⇔
   `creator != 0`; `open: bool` is the only switch).
-- **Indexer-complete events.** `NewClubCreated` now carries the deployed
-  `club_nft` address; `ClubStatusUpdated` and `MemberLeft` are new.
+- **Indexer-complete events.** `NewClubCreated` carries the deployed
+  `club_nft` address; `ClubStatusUpdated` and `MemberLeft` cover the full
+  lifecycle.
 
 ## Service Asset Declaration
 
@@ -53,7 +50,7 @@ This service follows the shared doctrine in
 | `access_semantics` | Current ownership of the non-transferable `IPClubNFT` |
 | `marketplace_visibility` | Display and index; no default marketplace listing |
 | `metadata_uri_policy` | `ipfs://` or `ar://` |
-| `src5_interface_id` | `IIP_CLUB_ID` (`starknet_keccak("mediolano.ip-club.v2")`), `IIP_CLUB_NFT_ID` (`starknet_keccak("mediolano.ip-club-nft.v2")`) |
+| `src5_interface_id` | `IIP_CLUB_ID`, `IIP_CLUB_NFT_ID` |
 
 The membership NFT exists for visibility, indexing, and access checks. It is
 not tradable by default because transferability would make membership state and
@@ -161,6 +158,4 @@ Current tested dependency baseline:
 
 ## Status
 
-This folder has been redesigned from the legacy implementation according to
-the audit in `AUDIT_REPORT.md`. It is still pre-production until it receives an
-external security review and deployment rehearsal.
+Pre-production until external security review and deployment rehearsal.

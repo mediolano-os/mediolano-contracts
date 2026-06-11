@@ -10,10 +10,10 @@ The protocol is the subscription sibling of `IP-Club`:
 - `IP-Club`: non-transferable membership access.
 - `IP-Subscription`: time-bound access with explicit expiry and renewal.
 
-## Design (v2, 2026-06-10)
+## Design
 
-The v2 redesign aligns the contract with the Mediolano principles
-(permissionless, ownerless, immutable, zero-fee, minimal data):
+The contract follows the Mediolano principles (permissionless, ownerless,
+immutable, zero-fee, minimal data):
 
 - **No contract owner.** `create_plan` is open to any caller; the plan's
   creator is recorded per plan and is the only address that can toggle that
@@ -25,8 +25,7 @@ The v2 redesign aligns the contract with the Mediolano principles
   to its expiry.
 - **Disjoint verbs.** `subscribe` starts a period when none is active;
   `renew_subscription` extends an active one from its current expiry. There is
-  no `unsubscribe` (prepaid access has nothing to cancel on-chain — removing
-  it removed the only path that could forfeit paid time) and no
+  no `unsubscribe` (prepaid access has nothing to cancel on-chain) and no
   `switch_subscription` (account abstraction composes it as a multicall).
 - **Minimal on-chain data.** A subscription is two timestamps keyed by
   `(subscriber, plan_id)`. There is no enumerable subscriber roster; indexers
@@ -47,7 +46,7 @@ This service follows the shared doctrine in
 | `access_semantics` | `is_subscribed(subscriber, plan_id)` derives access from expiry |
 | `marketplace_visibility` | Service/event visibility; no asset listing yet |
 | `metadata_uri_policy` | `ipfs://` or `ar://` for plan metadata |
-| `src5_interface_id` | `IIP_SUBSCRIPTION_ID` (`starknet_keccak("mediolano.ip-subscription.v2")`) |
+| `src5_interface_id` | `IIP_SUBSCRIPTION_ID` |
 
 The contract intentionally keeps access state as a plan-specific record rather
 than a tradable asset. If this service becomes asset-backed, the asset should

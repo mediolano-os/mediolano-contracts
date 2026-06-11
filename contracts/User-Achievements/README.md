@@ -77,4 +77,4 @@ scarb build
 scarb test
 ```
 
-> **Status: Pre-production.** This contract has not been audited. Do not use in production without a security review.
+> **Status: Pre-production.** Do not use in production without a security review.

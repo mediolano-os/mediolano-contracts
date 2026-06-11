@@ -19,6 +19,7 @@ pub mod ReentrantPaymentToken {
     struct Storage {
         ip_club: ContractAddress,
         club_id: u256,
+        attempted: bool,
     }
 
     #[event]
@@ -39,8 +40,13 @@ pub mod ReentrantPaymentToken {
             recipient: ContractAddress,
             amount: u256,
         ) -> bool {
-            let ip_club = IIPClubDispatcher { contract_address: self.ip_club.read() };
-            ip_club.join_club(self.club_id.read());
+            // Attempt the reentry exactly once, then behave like a normal
+            // token — bounds the attack to the realistic single nested call.
+            if !self.attempted.read() {
+                self.attempted.write(true);
+                let ip_club = IIPClubDispatcher { contract_address: self.ip_club.read() };
+                ip_club.join_club(self.club_id.read());
+            }
             true
         }
     }

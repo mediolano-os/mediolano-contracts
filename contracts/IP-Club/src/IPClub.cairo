@@ -1,3 +1,11 @@
+// IP-Club v2 — permissionless registry/factory for NFT-gated communities.
+//
+// Anyone can create a club; each club gets its own immutable IPClubNFT
+// membership contract (non-transferable, one per wallet). The registry has
+// no owner, no admin, no upgrade path, and takes no fee — optional entry
+// fees flow directly from joiner to club creator. The creator's only lever
+// is `set_club_open`, which gates NEW joins; existing memberships and the
+// right to leave are never affected.
 #[starknet::contract]
 pub mod IPClub {
     use core::hash::{HashStateExTrait, HashStateTrait};
@@ -12,10 +20,10 @@ pub mod IPClub {
     use starknet::{
         ClassHash, ContractAddress, get_block_timestamp, get_caller_address, get_contract_address,
     };
-    use crate::events::{ClubClosed, NewClubCreated, NewMember};
+    use crate::events::{ClubStatusUpdated, MemberLeft, NewClubCreated, NewMember};
     use crate::interfaces::IIPClub::{IIPClub, IIP_CLUB_ID};
     use crate::interfaces::IIPClubNFT::{IIPClubNFTDispatcher, IIPClubNFTDispatcherTrait};
-    use crate::types::{ClubRecord, ClubStatus, bytearray_starts_with};
+    use crate::types::{ClubRecord, bytearray_starts_with};
 
     component!(path: SRC5Component, storage: src5, event: SRC5Event);
 
@@ -27,10 +35,9 @@ pub mod IPClub {
     struct Storage {
         #[substorage(v0)]
         src5: SRC5Component::Storage,
-        ip_club_nft_class_hash: ClassHash, // Class hash for club NFT contracts
-        last_club_id: u256, // Last used club ID
-        clubs: Map<u256, ClubRecord>, // Mapping from club ID to club record
-        join_locked: bool,
+        ip_club_nft_class_hash: ClassHash,
+        last_club_id: u256,
+        clubs: Map<u256, ClubRecord>,
     }
 
     #[event]
@@ -38,23 +45,21 @@ pub mod IPClub {
     pub enum Event {
         #[flat]
         SRC5Event: SRC5Component::Event,
-        NewClubCreated: NewClubCreated, // Emitted when a new club is created
-        NewMember: NewMember, // Emitted when a new member joins a club
-        ClubClosed: ClubClosed // Emitted when a club is closed
+        NewClubCreated: NewClubCreated,
+        ClubStatusUpdated: ClubStatusUpdated,
+        NewMember: NewMember,
+        MemberLeft: MemberLeft,
     }
 
     #[constructor]
     fn constructor(ref self: ContractState, ip_club_nft_class_hash: ClassHash) {
         assert(ip_club_nft_class_hash.into() != 0_felt252, 'Class hash is zero');
         self.src5.register_interface(IIP_CLUB_ID);
-        self.ip_club_nft_class_hash.write(ip_club_nft_class_hash); // Store NFT class hash
+        self.ip_club_nft_class_hash.write(ip_club_nft_class_hash);
     }
 
     #[abi(embed_v0)]
     impl IPClubImpl of IIPClub<ContractState> {
-        /// Creates a new club and deploys its associated NFT contract.
-        /// # Description
-        /// This function initializes a new club entity and deploys a dedicated NFT contract for it.
         fn create_club(
             ref self: ContractState,
             name: ByteArray,
@@ -74,6 +79,7 @@ pub mod IPClub {
                 assert(max > 0, 'Max members cannot be zero');
             }
 
+            // A paid club carries both fee and token; a free club neither.
             assert(
                 (entry_fee.is_some() && payment_token.is_some())
                     || (entry_fee.is_none() && payment_token.is_none()),
@@ -88,18 +94,16 @@ pub mod IPClub {
                 assert(!token.is_zero(), 'Payment token cannot be null');
             }
 
-            let ip_club_manager = get_contract_address(); // Address of this contract
-            let creator = get_caller_address(); // Club creator
+            let ip_club_manager = get_contract_address();
+            let creator = get_caller_address();
             assert(!creator.is_zero(), 'Creator is zero address');
-            let next_club_id = self.last_club_id.read() + 1; // Increment club ID
+            let next_club_id = self.last_club_id.read() + 1;
             let deploy_salt = PoseidonTrait::new()
                 .update_with(creator)
                 .update_with(next_club_id)
                 .finalize();
 
             let mut constructor_calldata: Array<felt252> = array![];
-
-            // Serialize constructor arguments for NFT contract
             (
                 name.clone(),
                 symbol.clone(),
@@ -110,22 +114,16 @@ pub mod IPClub {
             )
                 .serialize(ref constructor_calldata);
 
-            // Deploy the NFT contract for the club
             let (ip_club_nft_address, _) = deploy_syscall(
                 self.ip_club_nft_class_hash.read(), deploy_salt, constructor_calldata.span(), false,
             )
                 .unwrap();
 
-            // Create and store the club record
             let club_record = ClubRecord {
-                id: next_club_id,
-                name,
-                symbol,
-                metadata_uri: metadata_uri.clone(),
-                status: ClubStatus::Open,
-                num_members: 0,
                 creator,
                 club_nft: ip_club_nft_address,
+                open: true,
+                num_members: 0,
                 max_members,
                 entry_fee,
                 payment_token,
@@ -134,12 +132,12 @@ pub mod IPClub {
             self.clubs.entry(next_club_id).write(club_record);
             self.last_club_id.write(next_club_id);
 
-            // Emit event for new club creation
             self
                 .emit(
                     NewClubCreated {
                         club_id: next_club_id,
                         creator,
+                        club_nft: ip_club_nft_address,
                         metadata_uri,
                         timestamp: get_block_timestamp(),
                     },
@@ -148,53 +146,32 @@ pub mod IPClub {
             next_club_id
         }
 
-        /// Closes an existing club, removing it from the registry.
-        /// # Access Control
-        /// Only the creator of the club can call this function.
-        /// # Arguments
-        /// * `club_id` - The unique identifier of the club to close.
-        fn close_club(ref self: ContractState, club_id: u256) {
+        fn set_club_open(ref self: ContractState, club_id: u256, open: bool) {
             let mut club_record = self.clubs.entry(club_id).read();
-            let caller = get_caller_address();
+            assert(!club_record.creator.is_zero(), 'Club does not exist');
+            assert(club_record.creator == get_caller_address(), 'Only club creator');
 
-            assert(club_record.status != ClubStatus::Inactive, 'Club does not exist');
-            assert(club_record.status == ClubStatus::Open, 'Club not open');
-            assert(club_record.creator == caller, 'Not Authorized');
-
-            club_record.status = ClubStatus::Closed;
+            club_record.open = open;
             self.clubs.entry(club_id).write(club_record);
 
-            // Emit event for club closure
-            self.emit(ClubClosed { club_id, creator: caller, timestamp: get_block_timestamp() });
+            self.emit(ClubStatusUpdated { club_id, open, timestamp: get_block_timestamp() });
         }
 
-        /// Allows a user to join a club by minting a membership NFT and transferring the entry fee
-        /// if required.
-        /// # Details
-        /// This function manages the club membership process, including:
-        /// - Minting a membership NFT for the user.
-        /// - Processing the entry fee payment if an entry fee is specified.
-        /// # Access Control
-        /// Accessible to any user wishing to join a club.
         fn join_club(ref self: ContractState, club_id: u256) {
             let mut club_record = self.clubs.entry(club_id).read();
 
             let caller = get_caller_address();
-
             assert(!caller.is_zero(), 'Caller is zero address');
-            assert(club_record.status != ClubStatus::Inactive, 'Club does not exist');
-            assert(club_record.status == ClubStatus::Open, 'Club not open');
+            assert(!club_record.creator.is_zero(), 'Club does not exist');
+            assert(club_record.open, 'Club not open');
 
-            let is_member = self.is_member(club_id, caller);
-            assert(!is_member, 'Already a member');
-
-            // Check if club is full
+            // Membership uniqueness is enforced by the NFT itself
+            // ('Already has nft' in IPClubNFT.mint) — the asset-side check
+            // covers every caller, so the registry does not duplicate it
+            // with a second cross-contract call.
             if let Option::Some(max) = club_record.max_members {
                 assert(club_record.num_members < max, 'Club full');
             }
-
-            assert(!self.join_locked.read(), 'Reentrant join');
-            self.join_locked.write(true);
 
             let creator = club_record.creator;
             let club_nft = club_record.club_nft;
@@ -204,38 +181,55 @@ pub mod IPClub {
             club_record.num_members += 1;
             self.clubs.entry(club_id).write(club_record);
 
-            // Handle entry fee payment if required
+            // State is final before the external calls (checks-effects-
+            // interactions); a reentrant call runs under its own caller
+            // context against consistent storage, and membership itself is
+            // guarded by the NFT's one-per-wallet invariant.
             if let Option::Some(fee) = entry_fee {
-                let payment_token_address = match payment_token {
-                    Option::Some(token) => token,
-                    Option::None => panic!("Payment token missing"),
-                };
-                let payment_token = IERC20Dispatcher { contract_address: payment_token_address };
-                let result = payment_token.transfer_from(caller, creator, fee);
+                // create_club guarantees a paid club carries a non-zero
+                // payment token, and club fee terms are immutable.
+                let token = IERC20Dispatcher { contract_address: payment_token.unwrap() };
+                let result = token.transfer_from(caller, creator, fee);
                 assert(result, 'Token Transfer Failed');
             }
 
-            // Mint club NFT to the new member
             let ip_club_nft = IIPClubNFTDispatcher { contract_address: club_nft };
             ip_club_nft.mint(caller);
 
-            self.join_locked.write(false);
-
-            // Emit event for new member
             self.emit(NewMember { club_id, member: caller, timestamp: get_block_timestamp() });
         }
 
-        // Get the club record for a given club ID
+        fn leave_club(ref self: ContractState, club_id: u256, token_id: u256) {
+            let mut club_record = self.clubs.entry(club_id).read();
+
+            let caller = get_caller_address();
+            assert(!club_record.creator.is_zero(), 'Club does not exist');
+
+            let club_nft = club_record.club_nft;
+
+            // Leaving is always allowed — open or closed. The entry fee is
+            // not refunded; it flowed to the creator at join time.
+            assert(club_record.num_members > 0, 'No members');
+            club_record.num_members -= 1;
+            self.clubs.entry(club_id).write(club_record);
+
+            // The NFT contract verifies caller's ownership of token_id and
+            // burns it (only this registry may call burn).
+            let ip_club_nft = IIPClubNFTDispatcher { contract_address: club_nft };
+            ip_club_nft.burn(caller, token_id);
+
+            self.emit(MemberLeft { club_id, member: caller, timestamp: get_block_timestamp() });
+        }
+
         fn get_club_record(self: @ContractState, club_id: u256) -> ClubRecord {
             let club_record = self.clubs.entry(club_id).read();
-            assert(club_record.status != ClubStatus::Inactive, 'Club does not exist');
+            assert(!club_record.creator.is_zero(), 'Club does not exist');
             club_record
         }
 
-        // Check if a user is a member of a club (owns the club NFT)
         fn is_member(self: @ContractState, club_id: u256, user: ContractAddress) -> bool {
             let club_record = self.clubs.entry(club_id).read();
-            assert(club_record.status != ClubStatus::Inactive, 'Club does not exist');
+            assert(!club_record.creator.is_zero(), 'Club does not exist');
             let ip_club_nft = IIPClubNFTDispatcher { contract_address: club_record.club_nft };
             ip_club_nft.has_nft(user)
         }

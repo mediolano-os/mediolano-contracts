@@ -1,3 +1,61 @@
+# IP Club — v2 Redesign Audit (2026-06-11)
+
+**Date:** 2026-06-11
+**Scope:** Principle-conformance audit of the post-2026-05-23 implementation, followed by the v2 redesign in this tree.
+**Result:** v2 implemented; `scarb build` clean; `snforge test` 28 passed, 0 failed.
+
+## Why a v2
+
+The 2026-05-23 remediation already established the right architecture
+(permissionless creation, non-transferable memberships enforced in the ERC-721
+hook, safe_mint, direct creator fees, no platform fee). The v2 findings:
+
+| # | Severity | Finding | v2 resolution |
+| --- | --- | --- | --- |
+| K1 | Medium (member sovereignty) | No exit path: non-transferable membership with no burn meant joining a public on-chain roster was permanent, and capped clubs never freed seats. The transfer hook already *permitted* burns (`to == 0`) but nothing exposed one | `leave_club(club_id, token_id)`: the member burns their own NFT via the registry (`IPClubNFT.burn` is manager-gated and verifies ownership). Always allowed — open or closed; no fee refund (paid value flowed to the creator at join). Frees the seat (tested: capped club accepts a new member after a leave) |
+| K2 | Medium | `close_club` was terminal — a club could never reopen, inconsistent with the reversible creator switches in IP-Subscription/IP-Tickets v2 | Replaced by `set_club_open(club_id, open)` — creator-only, gates new joins only; leaving still works while closed (tested) |
+| K3 | Low | `NewClubCreated` did not emit the deployed `club_nft` address — indexers had to call `get_club_record` per event | Event now carries `club_nft`; `ClubStatusUpdated` and `MemberLeft` added |
+| K4 | Low | Manual `join_locked` reentrancy lock was redundant (state written before the fee transfer and mint; membership guarded by the NFT's one-per-wallet invariant) and cost two storage writes per join | Lock removed. The reentrancy mock now attempts exactly one nested join and the transaction reverts atomically (the token contract is not an ERC-721 receiver) — unbounded mock recursion previously masked rather than tested the behavior |
+| K5 | Low | `ClubRecord` stored `id` (map key), `name`/`symbol`/`metadata_uri` (duplicated from the club's NFT contract — the asset is the source of truth), and a three-state `ClubStatus` enum with `Inactive` as a existence sentinel | Record slimmed to what the registry enforces: creator, club_nft, open, num_members, caps, fee terms. Existence ⇔ `creator != 0` |
+| K6 | Info | `panic!` ByteArray error in the fee branch | felt252 asserts; fee settlement unwraps under the create-time invariant (paid club ⇔ non-zero token, terms immutable) |
+| K7 | Info (measured optimization) | `join_club` duplicated the membership check (`is_member` cross-contract call) that `IPClubNFT.mint` already enforces ('Already has nft'), and `NftMinted` triplicated what ERC-721 `Transfer` + registry `NewMember` carry | Both removed. Measured with snforge before/after: **−437k L2 gas per join** (join-path tests −2.3% to −4.2%). Duplicate joins still revert atomically — the asset-side check covers every caller |
+
+## v2 invariants
+
+1. **Permissionless / ownerless / immutable**: anyone creates clubs; the registry has no admin; the NFT class hash is fixed at deploy; no fee taken by the contracts.
+2. **One membership per wallet, non-transferable**: enforced by the NFT hook (mint and burn are the only movements).
+3. **Creator's only lever is the join gate**: `set_club_open` never affects existing memberships or the right to leave.
+4. **Exit is unconditional**: a member can always burn their own membership; the seat frees; the fee is not refunded.
+5. **CEI**: registry state is final before the fee transfer and the mint; a failing external call reverts the join atomically.
+
+## Interface changes (v1 → v2)
+
+- `IIPClub`: `close_club` → `set_club_open(club_id, open)`; `leave_club(club_id, token_id)` added.
+- `IIPClubNFT`: `burn(member, token_id)` added (manager-only, ownership-verified).
+- `ClubRecord`: drops `id`/`name`/`symbol`/`metadata_uri`/`status`; gains `open: bool`.
+- Events: `NewClubCreated` + `club_nft`; `ClubClosed` → `ClubStatusUpdated`; `MemberLeft` new.
+- New SRC5 IDs: `starknet_keccak("mediolano.ip-club.v2")`, `starknet_keccak("mediolano.ip-club-nft.v2")`.
+
+## Verification
+
+```bash
+scarb fmt && scarb build   # clean (scarb 2.17.0 / snforge 0.59.0, pinned)
+snforge test               # 28 passed, 0 failed
+```
+
+New coverage: leave frees seat + rejoin under cap; leave while closed;
+foreign-token leave rejected; direct NFT burn by non-manager rejected;
+close/reopen cycle; reopened club accepts joins; bounded-reentrancy atomic
+revert.
+
+## Production recommendation
+
+Pre-production until external review and deployment rehearsal (declare both
+class hashes, deploy registry, verify the NFT class hash binding). The v1
+report below is retained for history.
+
+---
+
 # IP Club Audit And Remediation Report
 
 **Date:** 2026-05-23

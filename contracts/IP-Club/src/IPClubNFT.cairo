@@ -7,11 +7,10 @@ pub mod IPClubNFT {
     use starknet::storage::{
         StorageMapReadAccess, StoragePointerReadAccess, StoragePointerWriteAccess,
     };
-    use starknet::{ContractAddress, get_block_timestamp, get_caller_address};
+    use starknet::{ContractAddress, get_caller_address};
 
     component!(path: ERC721Component, storage: erc721, event: ERC721Event);
     component!(path: SRC5Component, storage: src5, event: SRC5Event);
-    use crate::events::NftMinted;
     use crate::interfaces::IIPClubNFT::{IIPClubNFT, IIP_CLUB_NFT_ID};
     use crate::types::bytearray_starts_with;
 
@@ -39,7 +38,6 @@ pub mod IPClubNFT {
         ERC721Event: ERC721Component::Event,
         #[flat]
         SRC5Event: SRC5Component::Event,
-        NFTMinted: NftMinted,
     }
 
     #[constructor]
@@ -113,17 +111,18 @@ pub mod IPClubNFT {
             let next_token_id = self.last_token_id.read() + 1;
             self.erc721.safe_mint(recipient, next_token_id, array![].span());
             self.last_token_id.write(next_token_id);
+        }
 
-            // Emit NFTMinted event
-            self
-                .emit(
-                    NftMinted {
-                        club_id: self.club_id.read(),
-                        token_id: next_token_id,
-                        recipient,
-                        timestamp: get_block_timestamp(),
-                    },
-                );
+        /// Burns a member's NFT — the leave path. Only the IPClub registry
+        /// may call this, and only for a token the member actually owns.
+        /// The transfer hook permits burns (`to == 0`), so non-transferable
+        /// membership remains enforced for every other movement.
+        fn burn(ref self: ContractState, member: ContractAddress, token_id: u256) {
+            assert(get_caller_address() == self.ip_club_manager.read(), 'Not club manager');
+            let owner = self.erc721.ERC721_owners.read(token_id);
+            assert(owner == member, 'Not token owner');
+
+            self.erc721.burn(token_id);
         }
 
         // Check if a user already owns an NFT

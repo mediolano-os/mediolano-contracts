@@ -1,3 +1,7 @@
 pub mod IPSponsorship;
 pub mod interface;
-pub mod errors;
+pub mod types;
+pub mod mocks {
+    pub mod MockERC20;
+    pub mod MockERC721;
+}

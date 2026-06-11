@@ -165,9 +165,10 @@ pub mod IPClub {
             assert(!club_record.creator.is_zero(), 'Club does not exist');
             assert(club_record.open, 'Club not open');
 
-            let is_member = self.is_member(club_id, caller);
-            assert(!is_member, 'Already a member');
-
+            // Membership uniqueness is enforced by the NFT itself
+            // ('Already has nft' in IPClubNFT.mint) — the asset-side check
+            // covers every caller, so the registry does not duplicate it
+            // with a second cross-contract call.
             if let Option::Some(max) = club_record.max_members {
                 assert(club_record.num_members < max, 'Club full');
             }

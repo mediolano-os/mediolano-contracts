@@ -310,7 +310,7 @@ fn test_join_club_reentrant_payment_token_reverts_atomically() {
 }
 
 #[test]
-#[should_panic(expected: 'Already a member')]
+#[should_panic(expected: 'Already has nft')]
 fn test_cannot_join_club_twice() {
     let TestContracts { ip_club, .. } = initialize_contracts();
     let member = deploy_receiver();

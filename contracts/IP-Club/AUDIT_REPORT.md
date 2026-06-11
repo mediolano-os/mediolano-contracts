@@ -18,6 +18,7 @@ hook, safe_mint, direct creator fees, no platform fee). The v2 findings:
 | K4 | Low | Manual `join_locked` reentrancy lock was redundant (state written before the fee transfer and mint; membership guarded by the NFT's one-per-wallet invariant) and cost two storage writes per join | Lock removed. The reentrancy mock now attempts exactly one nested join and the transaction reverts atomically (the token contract is not an ERC-721 receiver) — unbounded mock recursion previously masked rather than tested the behavior |
 | K5 | Low | `ClubRecord` stored `id` (map key), `name`/`symbol`/`metadata_uri` (duplicated from the club's NFT contract — the asset is the source of truth), and a three-state `ClubStatus` enum with `Inactive` as a existence sentinel | Record slimmed to what the registry enforces: creator, club_nft, open, num_members, caps, fee terms. Existence ⇔ `creator != 0` |
 | K6 | Info | `panic!` ByteArray error in the fee branch | felt252 asserts; fee settlement unwraps under the create-time invariant (paid club ⇔ non-zero token, terms immutable) |
+| K7 | Info (measured optimization) | `join_club` duplicated the membership check (`is_member` cross-contract call) that `IPClubNFT.mint` already enforces ('Already has nft'), and `NftMinted` triplicated what ERC-721 `Transfer` + registry `NewMember` carry | Both removed. Measured with snforge before/after: **−437k L2 gas per join** (join-path tests −2.3% to −4.2%). Duplicate joins still revert atomically — the asset-side check covers every caller |
 
 ## v2 invariants
 

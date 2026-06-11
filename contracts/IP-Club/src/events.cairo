@@ -37,13 +37,3 @@ pub struct MemberLeft {
     pub timestamp: u64,
 }
 
-#[derive(Drop, starknet::Event)]
-pub struct NftMinted {
-    #[key]
-    pub club_id: u256,
-    #[key]
-    pub token_id: u256,
-    #[key]
-    pub recipient: ContractAddress,
-    pub timestamp: u64,
-}

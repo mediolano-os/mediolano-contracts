@@ -1,26 +1,23 @@
 use starknet::ContractAddress;
 
+// A plan exists iff `creator != 0` (create_plan rejects a zero caller).
 #[derive(Drop, Serde, starknet::Store, Clone)]
 pub struct PlanRecord {
-    pub id: u256,
+    pub creator: ContractAddress,
+    pub recipient: ContractAddress,
     pub price: u256,
     pub duration: u64,
-    pub tier: felt252,
     pub payment_token: Option<ContractAddress>,
-    pub recipient: ContractAddress,
     pub metadata_uri: ByteArray,
     pub active: bool,
-    pub exists: bool,
 }
 
+// A subscription exists iff `expires_at != 0`. It is active iff `expires_at >= now`.
+// Renewal extends `expires_at`; `started_at` marks the beginning of the current streak.
 #[derive(Copy, Drop, Serde, starknet::Store)]
 pub struct SubscriptionRecord {
-    pub subscriber: ContractAddress,
-    pub plan_id: u256,
     pub started_at: u64,
     pub expires_at: u64,
-    pub active: bool,
-    pub exists: bool,
 }
 
 pub fn bytearray_starts_with(haystack: @ByteArray, needle: @ByteArray) -> bool {

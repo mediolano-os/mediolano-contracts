@@ -11,8 +11,12 @@ use snforge_std::{
 };
 use starknet::ContractAddress;
 
-fn OWNER() -> ContractAddress {
+fn CREATOR1() -> ContractAddress {
     0x101.try_into().unwrap()
+}
+
+fn CREATOR2() -> ContractAddress {
+    0x105.try_into().unwrap()
 }
 
 fn USER1() -> ContractAddress {
@@ -43,16 +47,16 @@ fn HTTP_URI() -> ByteArray {
     "https://example.com/plan.json"
 }
 
+const HOUR: u64 = 3600;
+
 fn declare_and_deploy(contract_name: ByteArray, calldata: Array<felt252>) -> ContractAddress {
     let contract = declare(contract_name).unwrap().contract_class();
     let (contract_address, _) = contract.deploy(@calldata).unwrap();
     contract_address
 }
 
-fn deploy_subscription(owner: ContractAddress) -> ISubscriptionDispatcher {
-    let mut calldata = array![];
-    calldata.append_serde(owner);
-    let address = declare_and_deploy("Subscription", calldata);
+fn deploy_subscription() -> ISubscriptionDispatcher {
+    let address = declare_and_deploy("Subscription", array![]);
     ISubscriptionDispatcher { contract_address: address }
 }
 
@@ -79,291 +83,142 @@ fn deploy_reentrant_payment_token(subscription: ContractAddress, plan_id: u256) 
     declare_and_deploy("ReentrantPaymentToken", calldata)
 }
 
-fn create_free_plan(subscription: ISubscriptionDispatcher) -> u256 {
-    cheat_caller_address(subscription.contract_address, OWNER(), CheatSpan::TargetCalls(1));
-    subscription.create_plan(0, 3600, 1, Option::None, RECIPIENT(), IPFS_URI())
+fn create_free_plan(subscription: ISubscriptionDispatcher, creator: ContractAddress) -> u256 {
+    cheat_caller_address(subscription.contract_address, creator, CheatSpan::TargetCalls(1));
+    subscription.create_plan(0, HOUR, Option::None, RECIPIENT(), IPFS_URI())
 }
 
+fn create_paid_plan(
+    subscription: ISubscriptionDispatcher,
+    creator: ContractAddress,
+    token: ContractAddress,
+    price: u256,
+) -> u256 {
+    cheat_caller_address(subscription.contract_address, creator, CheatSpan::TargetCalls(1));
+    subscription.create_plan(price, HOUR, Option::Some(token), RECIPIENT(), IPFS_URI())
+}
+
+fn fund_and_approve(
+    token: IERC20Dispatcher, user: ContractAddress, spender: ContractAddress, amount: u256,
+) {
+    mint_erc20(token.contract_address, user, amount);
+    cheat_caller_address(token.contract_address, user, CheatSpan::TargetCalls(1));
+    token.approve(spender, amount);
+}
+
+fn at(subscription: ISubscriptionDispatcher, ts: u64) {
+    cheat_block_timestamp(subscription.contract_address, ts, CheatSpan::TargetCalls(1));
+}
+
+// --- plan creation ---
+
 #[test]
-fn test_create_free_plan() {
-    let subscription = deploy_subscription(OWNER());
+fn test_create_plan_is_permissionless() {
+    let subscription = deploy_subscription();
 
-    let plan_id = create_free_plan(subscription);
+    let first = create_free_plan(subscription, CREATOR1());
+    let second = create_free_plan(subscription, CREATOR2());
 
-    assert(subscription.get_owner() == OWNER(), 'owner should match');
-    assert(plan_id == 1, 'plan id should be one');
-    assert(subscription.get_last_plan_id() == 1, 'last plan id should match');
+    assert(first == 1, 'first plan id should be one');
+    assert(second == 2, 'second plan id should be two');
+    assert(subscription.get_last_plan_id() == 2, 'last plan id should match');
 
-    let plan = subscription.get_plan(plan_id);
-    assert(plan.exists, 'plan should exist');
-    assert(plan.active, 'plan should be active');
-    assert(plan.price == 0, 'price should be zero');
-    assert(plan.duration == 3600, 'duration should match');
-    assert(plan.metadata_uri == IPFS_URI(), 'metadata should match');
+    let plan1 = subscription.get_plan(first);
+    assert(plan1.creator == CREATOR1(), 'creator1 should be recorded');
+    assert(plan1.active, 'plan1 should be live');
+    assert(plan1.price == 0, 'price should be zero');
+    assert(plan1.duration == HOUR, 'duration should match');
+    assert(plan1.metadata_uri == IPFS_URI(), 'metadata should match');
+
+    let plan2 = subscription.get_plan(second);
+    assert(plan2.creator == CREATOR2(), 'creator2 should be recorded');
 }
 
 #[test]
 fn test_create_plan_accepts_ar_uri() {
-    let subscription = deploy_subscription(OWNER());
+    let subscription = deploy_subscription();
 
-    cheat_caller_address(subscription.contract_address, OWNER(), CheatSpan::TargetCalls(1));
-    let plan_id = subscription.create_plan(0, 3600, 1, Option::None, RECIPIENT(), AR_URI());
+    cheat_caller_address(subscription.contract_address, CREATOR1(), CheatSpan::TargetCalls(1));
+    let plan_id = subscription.create_plan(0, HOUR, Option::None, RECIPIENT(), AR_URI());
 
     assert(subscription.get_plan(plan_id).metadata_uri == AR_URI(), 'metadata should match');
 }
 
 #[test]
-#[should_panic]
-fn test_constructor_rejects_zero_owner() {
-    deploy_subscription(ZERO());
-}
+#[should_panic(expected: 'URI must be ipfs:// or ar://')]
+fn test_create_plan_rejects_http_uri() {
+    let subscription = deploy_subscription();
 
-#[test]
-#[should_panic(expected: 'Only owner can create plans')]
-fn test_only_owner_can_create_plan() {
-    let subscription = deploy_subscription(OWNER());
-
-    cheat_caller_address(subscription.contract_address, USER1(), CheatSpan::TargetCalls(1));
-    subscription.create_plan(0, 3600, 1, Option::None, RECIPIENT(), IPFS_URI());
+    cheat_caller_address(subscription.contract_address, CREATOR1(), CheatSpan::TargetCalls(1));
+    subscription.create_plan(0, HOUR, Option::None, RECIPIENT(), HTTP_URI());
 }
 
 #[test]
 #[should_panic(expected: 'Duration cannot be zero')]
 fn test_create_plan_rejects_zero_duration() {
-    let subscription = deploy_subscription(OWNER());
+    let subscription = deploy_subscription();
 
-    cheat_caller_address(subscription.contract_address, OWNER(), CheatSpan::TargetCalls(1));
-    subscription.create_plan(0, 0, 1, Option::None, RECIPIENT(), IPFS_URI());
+    cheat_caller_address(subscription.contract_address, CREATOR1(), CheatSpan::TargetCalls(1));
+    subscription.create_plan(0, 0, Option::None, RECIPIENT(), IPFS_URI());
 }
 
 #[test]
-#[should_panic(expected: 'URI must be ipfs:// or ar://')]
-fn test_create_plan_rejects_http_uri() {
-    let subscription = deploy_subscription(OWNER());
+#[should_panic(expected: 'Recipient is zero address')]
+fn test_create_plan_rejects_zero_recipient() {
+    let subscription = deploy_subscription();
 
-    cheat_caller_address(subscription.contract_address, OWNER(), CheatSpan::TargetCalls(1));
-    subscription.create_plan(0, 3600, 1, Option::None, RECIPIENT(), HTTP_URI());
+    cheat_caller_address(subscription.contract_address, CREATOR1(), CheatSpan::TargetCalls(1));
+    subscription.create_plan(0, HOUR, Option::None, ZERO(), IPFS_URI());
 }
 
 #[test]
 #[should_panic(expected: 'Free plan cannot use token')]
 fn test_free_plan_rejects_payment_token() {
-    let subscription = deploy_subscription(OWNER());
-    let erc20 = deploy_erc20();
+    let subscription = deploy_subscription();
+    let token = deploy_erc20();
 
-    cheat_caller_address(subscription.contract_address, OWNER(), CheatSpan::TargetCalls(1));
+    cheat_caller_address(subscription.contract_address, CREATOR1(), CheatSpan::TargetCalls(1));
     subscription
-        .create_plan(0, 3600, 1, Option::Some(erc20.contract_address), RECIPIENT(), IPFS_URI());
+        .create_plan(0, HOUR, Option::Some(token.contract_address), RECIPIENT(), IPFS_URI());
 }
 
 #[test]
-#[should_panic]
+#[should_panic(expected: 'Paid plan requires token')]
 fn test_paid_plan_requires_payment_token() {
-    let subscription = deploy_subscription(OWNER());
+    let subscription = deploy_subscription();
 
-    cheat_caller_address(subscription.contract_address, OWNER(), CheatSpan::TargetCalls(1));
-    subscription.create_plan(1000, 3600, 1, Option::None, RECIPIENT(), IPFS_URI());
+    cheat_caller_address(subscription.contract_address, CREATOR1(), CheatSpan::TargetCalls(1));
+    subscription.create_plan(100, HOUR, Option::None, RECIPIENT(), IPFS_URI());
+}
+
+// --- plan management ---
+
+#[test]
+#[should_panic(expected: 'Only plan creator')]
+fn test_only_plan_creator_can_toggle() {
+    let subscription = deploy_subscription();
+    let plan_id = create_free_plan(subscription, CREATOR1());
+
+    cheat_caller_address(subscription.contract_address, CREATOR2(), CheatSpan::TargetCalls(1));
+    subscription.set_plan_active(plan_id, false);
 }
 
 #[test]
-fn test_subscribe_free_plan_records_expiry() {
-    let subscription = deploy_subscription(OWNER());
-    let plan_id = create_free_plan(subscription);
-    let now: u64 = 1000;
+#[should_panic(expected: 'Plan does not exist')]
+fn test_toggle_unknown_plan_reverts() {
+    let subscription = deploy_subscription();
 
-    cheat_block_timestamp(subscription.contract_address, now, CheatSpan::TargetCalls(1));
-    cheat_caller_address(subscription.contract_address, USER1(), CheatSpan::TargetCalls(1));
-    subscription.subscribe(plan_id);
-
-    let record = subscription.get_subscription(USER1(), plan_id);
-    assert(record.subscriber == USER1(), 'subscriber should match');
-    assert(record.plan_id == plan_id, 'plan should match');
-    assert(record.started_at == now, 'start should match');
-    assert(record.expires_at == now + 3600, 'expiry should match');
-    assert(subscription.is_subscribed(USER1(), plan_id), 'should be subscribed');
-
-    let plan_ids = subscription.get_user_plan_ids(USER1());
-    assert(plan_ids.len() == 1, 'one plan id expected');
-    assert(*plan_ids.at(0) == plan_id, 'plan id should match');
-}
-
-#[test]
-#[should_panic(expected: 'Already subscribed')]
-fn test_cannot_duplicate_active_subscription() {
-    let subscription = deploy_subscription(OWNER());
-    let plan_id = create_free_plan(subscription);
-
-    cheat_caller_address(subscription.contract_address, USER1(), CheatSpan::TargetCalls(1));
-    subscription.subscribe(plan_id);
-
-    cheat_caller_address(subscription.contract_address, USER1(), CheatSpan::TargetCalls(1));
-    subscription.subscribe(plan_id);
-}
-
-#[test]
-fn test_subscription_expires_by_time() {
-    let subscription = deploy_subscription(OWNER());
-    let plan_id = create_free_plan(subscription);
-
-    cheat_block_timestamp(subscription.contract_address, 1000, CheatSpan::TargetCalls(1));
-    cheat_caller_address(subscription.contract_address, USER1(), CheatSpan::TargetCalls(1));
-    subscription.subscribe(plan_id);
-
-    cheat_block_timestamp(subscription.contract_address, 5000, CheatSpan::TargetCalls(1));
-    assert(!subscription.is_subscribed(USER1(), plan_id), 'should expire');
-}
-
-#[test]
-fn test_renew_subscription_extends_active_subscription() {
-    let subscription = deploy_subscription(OWNER());
-    let plan_id = create_free_plan(subscription);
-
-    cheat_block_timestamp(subscription.contract_address, 1000, CheatSpan::TargetCalls(1));
-    cheat_caller_address(subscription.contract_address, USER1(), CheatSpan::TargetCalls(1));
-    subscription.subscribe(plan_id);
-
-    cheat_block_timestamp(subscription.contract_address, 2000, CheatSpan::TargetCalls(1));
-    cheat_caller_address(subscription.contract_address, USER1(), CheatSpan::TargetCalls(1));
-    subscription.renew_subscription(plan_id);
-
-    let record = subscription.get_subscription(USER1(), plan_id);
-    assert(record.expires_at == 8200, 'renew extends expiry');
-    assert(subscription.is_subscribed(USER1(), plan_id), 'should still be active');
-}
-
-#[test]
-fn test_renew_expired_subscription_reactivates_from_now() {
-    let subscription = deploy_subscription(OWNER());
-    let plan_id = create_free_plan(subscription);
-
-    cheat_block_timestamp(subscription.contract_address, 1000, CheatSpan::TargetCalls(1));
-    cheat_caller_address(subscription.contract_address, USER1(), CheatSpan::TargetCalls(1));
-    subscription.subscribe(plan_id);
-
-    cheat_block_timestamp(subscription.contract_address, 5000, CheatSpan::TargetCalls(1));
-    cheat_caller_address(subscription.contract_address, USER1(), CheatSpan::TargetCalls(1));
-    subscription.renew_subscription(plan_id);
-
-    let record = subscription.get_subscription(USER1(), plan_id);
-    assert(record.expires_at == 8600, 'renewal should start from now');
-    assert(subscription.is_subscribed(USER1(), plan_id), 'should be active');
-}
-
-#[test]
-fn test_unsubscribe_disables_subscription() {
-    let subscription = deploy_subscription(OWNER());
-    let plan_id = create_free_plan(subscription);
-
-    cheat_caller_address(subscription.contract_address, USER1(), CheatSpan::TargetCalls(1));
-    subscription.subscribe(plan_id);
-
-    cheat_block_timestamp(subscription.contract_address, 1200, CheatSpan::TargetCalls(1));
-    cheat_caller_address(subscription.contract_address, USER1(), CheatSpan::TargetCalls(1));
-    subscription.unsubscribe(plan_id);
-
-    assert(!subscription.is_subscribed(USER1(), plan_id), 'should not be active');
-    let record = subscription.get_subscription(USER1(), plan_id);
-    assert(record.expires_at == 1200, 'expiry is unsubscribe');
-}
-
-#[test]
-fn test_paid_subscribe_transfers_tokens() {
-    let subscription = deploy_subscription(OWNER());
-    let erc20 = deploy_erc20();
-
-    cheat_caller_address(subscription.contract_address, OWNER(), CheatSpan::TargetCalls(1));
-    let plan_id = subscription
-        .create_plan(1000, 3600, 1, Option::Some(erc20.contract_address), RECIPIENT(), IPFS_URI());
-
-    mint_erc20(erc20.contract_address, USER1(), 3000);
-    cheat_caller_address(erc20.contract_address, USER1(), CheatSpan::TargetCalls(1));
-    erc20.approve(subscription.contract_address, 1000);
-
-    cheat_caller_address(subscription.contract_address, USER1(), CheatSpan::TargetCalls(1));
-    subscription.subscribe(plan_id);
-
-    assert(erc20.balance_of(RECIPIENT()) == 1000, 'recipient should be paid');
-    assert(erc20.balance_of(USER1()) == 2000, 'payer balance should decrement');
-}
-
-#[test]
-fn test_paid_renew_transfers_tokens() {
-    let subscription = deploy_subscription(OWNER());
-    let erc20 = deploy_erc20();
-
-    cheat_caller_address(subscription.contract_address, OWNER(), CheatSpan::TargetCalls(1));
-    let plan_id = subscription
-        .create_plan(1000, 3600, 1, Option::Some(erc20.contract_address), RECIPIENT(), IPFS_URI());
-
-    mint_erc20(erc20.contract_address, USER1(), 3000);
-    cheat_caller_address(erc20.contract_address, USER1(), CheatSpan::TargetCalls(1));
-    erc20.approve(subscription.contract_address, 3000);
-
-    cheat_caller_address(subscription.contract_address, USER1(), CheatSpan::TargetCalls(1));
-    subscription.subscribe(plan_id);
-
-    cheat_block_timestamp(subscription.contract_address, 2000, CheatSpan::TargetCalls(1));
-    cheat_caller_address(subscription.contract_address, USER1(), CheatSpan::TargetCalls(1));
-    subscription.renew_subscription(plan_id);
-
-    assert(erc20.balance_of(RECIPIENT()) == 2000, 'recipient gets renewal');
-    assert(erc20.balance_of(USER1()) == 1000, 'payer pays twice');
-}
-
-#[test]
-fn test_paid_switch_transfers_new_plan_price() {
-    let subscription = deploy_subscription(OWNER());
-    let erc20 = deploy_erc20();
-
-    cheat_caller_address(subscription.contract_address, OWNER(), CheatSpan::TargetCalls(2));
-    let basic_id = subscription.create_plan(0, 3600, 1, Option::None, RECIPIENT(), IPFS_URI());
-    let pro_id = subscription
-        .create_plan(2000, 7200, 2, Option::Some(erc20.contract_address), RECIPIENT(), IPFS_URI());
-
-    mint_erc20(erc20.contract_address, USER1(), 2500);
-    cheat_caller_address(erc20.contract_address, USER1(), CheatSpan::TargetCalls(1));
-    erc20.approve(subscription.contract_address, 2000);
-
-    cheat_caller_address(subscription.contract_address, USER1(), CheatSpan::TargetCalls(1));
-    subscription.subscribe(basic_id);
-
-    cheat_caller_address(subscription.contract_address, USER1(), CheatSpan::TargetCalls(1));
-    subscription.switch_subscription(basic_id, pro_id);
-
-    assert(erc20.balance_of(RECIPIENT()) == 2000, 'recipient gets pro');
-    assert(erc20.balance_of(USER1()) == 500, 'payer pays pro');
-}
-
-#[test]
-fn test_switch_subscription() {
-    let subscription = deploy_subscription(OWNER());
-
-    cheat_caller_address(subscription.contract_address, OWNER(), CheatSpan::TargetCalls(2));
-    let basic_id = subscription.create_plan(0, 3600, 1, Option::None, RECIPIENT(), IPFS_URI());
-    let pro_id = subscription.create_plan(0, 7200, 2, Option::None, RECIPIENT(), IPFS_URI());
-
-    cheat_block_timestamp(subscription.contract_address, 1000, CheatSpan::TargetCalls(1));
-    cheat_caller_address(subscription.contract_address, USER1(), CheatSpan::TargetCalls(1));
-    subscription.subscribe(basic_id);
-
-    cheat_block_timestamp(subscription.contract_address, 1500, CheatSpan::TargetCalls(1));
-    cheat_caller_address(subscription.contract_address, USER1(), CheatSpan::TargetCalls(1));
-    subscription.switch_subscription(basic_id, pro_id);
-
-    assert(!subscription.is_subscribed(USER1(), basic_id), 'basic should be inactive');
-    assert(subscription.is_subscribed(USER1(), pro_id), 'pro should be active');
-    assert(
-        subscription.get_subscription(USER1(), pro_id).expires_at == 8700, 'expiry should match',
-    );
+    cheat_caller_address(subscription.contract_address, CREATOR1(), CheatSpan::TargetCalls(1));
+    subscription.set_plan_active(42, false);
 }
 
 #[test]
 #[should_panic(expected: 'Plan is inactive')]
-fn test_inactive_plan_rejects_new_subscription() {
-    let subscription = deploy_subscription(OWNER());
-    let plan_id = create_free_plan(subscription);
+fn test_deactivation_blocks_subscribe() {
+    let subscription = deploy_subscription();
+    let plan_id = create_free_plan(subscription, CREATOR1());
 
-    cheat_caller_address(subscription.contract_address, OWNER(), CheatSpan::TargetCalls(1));
+    cheat_caller_address(subscription.contract_address, CREATOR1(), CheatSpan::TargetCalls(1));
     subscription.set_plan_active(plan_id, false);
 
     cheat_caller_address(subscription.contract_address, USER1(), CheatSpan::TargetCalls(1));
@@ -371,33 +226,267 @@ fn test_inactive_plan_rejects_new_subscription() {
 }
 
 #[test]
-#[should_panic(expected: 'Reentrant subscription')]
-fn test_reentrant_payment_token_rejected() {
-    let subscription = deploy_subscription(OWNER());
-    let expected_plan_id = 1;
-    let token = deploy_reentrant_payment_token(subscription.contract_address, expected_plan_id);
+#[should_panic(expected: 'Plan is inactive')]
+fn test_deactivation_blocks_renewal() {
+    let subscription = deploy_subscription();
+    let plan_id = create_free_plan(subscription, CREATOR1());
 
-    cheat_caller_address(subscription.contract_address, OWNER(), CheatSpan::TargetCalls(1));
-    let plan_id = subscription
-        .create_plan(1000, 3600, 1, Option::Some(token), RECIPIENT(), IPFS_URI());
-    assert(plan_id == expected_plan_id, 'test expects first plan');
+    at(subscription, 1000);
+    cheat_caller_address(subscription.contract_address, USER1(), CheatSpan::TargetCalls(1));
+    subscription.subscribe(plan_id);
 
+    cheat_caller_address(subscription.contract_address, CREATOR1(), CheatSpan::TargetCalls(1));
+    subscription.set_plan_active(plan_id, false);
+
+    at(subscription, 2000);
+    cheat_caller_address(subscription.contract_address, USER1(), CheatSpan::TargetCalls(1));
+    subscription.renew_subscription(plan_id);
+}
+
+#[test]
+fn test_deactivation_preserves_paid_access() {
+    let subscription = deploy_subscription();
+    let plan_id = create_free_plan(subscription, CREATOR1());
+
+    at(subscription, 1000);
+    cheat_caller_address(subscription.contract_address, USER1(), CheatSpan::TargetCalls(1));
+    subscription.subscribe(plan_id);
+
+    cheat_caller_address(subscription.contract_address, CREATOR1(), CheatSpan::TargetCalls(1));
+    subscription.set_plan_active(plan_id, false);
+
+    at(subscription, 2000);
+    assert(subscription.is_subscribed(USER1(), plan_id), 'paid access should survive');
+}
+
+#[test]
+fn test_reactivation_allows_subscribe() {
+    let subscription = deploy_subscription();
+    let plan_id = create_free_plan(subscription, CREATOR1());
+
+    cheat_caller_address(subscription.contract_address, CREATOR1(), CheatSpan::TargetCalls(1));
+    subscription.set_plan_active(plan_id, false);
+    cheat_caller_address(subscription.contract_address, CREATOR1(), CheatSpan::TargetCalls(1));
+    subscription.set_plan_active(plan_id, true);
+
+    at(subscription, 1000);
+    cheat_caller_address(subscription.contract_address, USER1(), CheatSpan::TargetCalls(1));
+    subscription.subscribe(plan_id);
+
+    at(subscription, 1000);
+    assert(subscription.is_subscribed(USER1(), plan_id), 'subscribe should work again');
+}
+
+// --- subscribe / expiry ---
+
+#[test]
+fn test_subscribe_records_expiry() {
+    let subscription = deploy_subscription();
+    let plan_id = create_free_plan(subscription, CREATOR1());
+
+    at(subscription, 1000);
+    cheat_caller_address(subscription.contract_address, USER1(), CheatSpan::TargetCalls(1));
+    subscription.subscribe(plan_id);
+
+    let record = subscription.get_subscription(USER1(), plan_id);
+    assert(record.started_at == 1000, 'started_at should match');
+    assert(record.expires_at == 1000 + HOUR, 'expires_at should match');
+}
+
+#[test]
+#[should_panic(expected: 'Already subscribed')]
+fn test_cannot_duplicate_active_subscription() {
+    let subscription = deploy_subscription();
+    let plan_id = create_free_plan(subscription, CREATOR1());
+
+    at(subscription, 1000);
+    cheat_caller_address(subscription.contract_address, USER1(), CheatSpan::TargetCalls(1));
+    subscription.subscribe(plan_id);
+
+    at(subscription, 2000);
     cheat_caller_address(subscription.contract_address, USER1(), CheatSpan::TargetCalls(1));
     subscription.subscribe(plan_id);
 }
 
 #[test]
-fn test_supports_subscription_interface() {
-    let subscription = deploy_subscription(OWNER());
-    let src5 = ISRC5Dispatcher { contract_address: subscription.contract_address };
+fn test_subscription_expires_by_time() {
+    let subscription = deploy_subscription();
+    let plan_id = create_free_plan(subscription, CREATOR1());
 
-    assert(src5.supports_interface(IIP_SUBSCRIPTION_ID), 'interface should be supported');
+    at(subscription, 1000);
+    cheat_caller_address(subscription.contract_address, USER1(), CheatSpan::TargetCalls(1));
+    subscription.subscribe(plan_id);
+
+    // Active through the exact expiry second, inactive after it.
+    at(subscription, 1000 + HOUR);
+    assert(subscription.is_subscribed(USER1(), plan_id), 'active at expiry boundary');
+    at(subscription, 1001 + HOUR);
+    assert(!subscription.is_subscribed(USER1(), plan_id), 'inactive after expiry');
+}
+
+#[test]
+fn test_resubscribe_after_expiry() {
+    let subscription = deploy_subscription();
+    let plan_id = create_free_plan(subscription, CREATOR1());
+
+    at(subscription, 1000);
+    cheat_caller_address(subscription.contract_address, USER1(), CheatSpan::TargetCalls(1));
+    subscription.subscribe(plan_id);
+
+    let restart = 2000 + HOUR;
+    at(subscription, restart);
+    cheat_caller_address(subscription.contract_address, USER1(), CheatSpan::TargetCalls(1));
+    subscription.subscribe(plan_id);
+
+    let record = subscription.get_subscription(USER1(), plan_id);
+    assert(record.started_at == restart, 'streak should restart');
+    assert(record.expires_at == restart + HOUR, 'expiry should restart');
+}
+
+// --- renewal ---
+
+#[test]
+fn test_renew_extends_from_current_expiry() {
+    let subscription = deploy_subscription();
+    let plan_id = create_free_plan(subscription, CREATOR1());
+
+    at(subscription, 1000);
+    cheat_caller_address(subscription.contract_address, USER1(), CheatSpan::TargetCalls(1));
+    subscription.subscribe(plan_id);
+
+    at(subscription, 2000);
+    cheat_caller_address(subscription.contract_address, USER1(), CheatSpan::TargetCalls(1));
+    subscription.renew_subscription(plan_id);
+
+    let record = subscription.get_subscription(USER1(), plan_id);
+    assert(record.started_at == 1000, 'streak start should be kept');
+    assert(record.expires_at == 1000 + 2 * HOUR, 'expiry should stack');
+}
+
+#[test]
+#[should_panic(expected: 'Subscription inactive')]
+fn test_renew_expired_subscription_reverts() {
+    let subscription = deploy_subscription();
+    let plan_id = create_free_plan(subscription, CREATOR1());
+
+    at(subscription, 1000);
+    cheat_caller_address(subscription.contract_address, USER1(), CheatSpan::TargetCalls(1));
+    subscription.subscribe(plan_id);
+
+    at(subscription, 2000 + HOUR);
+    cheat_caller_address(subscription.contract_address, USER1(), CheatSpan::TargetCalls(1));
+    subscription.renew_subscription(plan_id);
+}
+
+#[test]
+#[should_panic(expected: 'Subscription inactive')]
+fn test_renew_without_subscription_reverts() {
+    let subscription = deploy_subscription();
+    let plan_id = create_free_plan(subscription, CREATOR1());
+
+    cheat_caller_address(subscription.contract_address, USER1(), CheatSpan::TargetCalls(1));
+    subscription.renew_subscription(plan_id);
+}
+
+// --- payments ---
+
+#[test]
+fn test_paid_subscribe_transfers_tokens() {
+    let subscription = deploy_subscription();
+    let token = deploy_erc20();
+    let price: u256 = 250;
+    let plan_id = create_paid_plan(subscription, CREATOR1(), token.contract_address, price);
+
+    fund_and_approve(token, USER1(), subscription.contract_address, price);
+
+    at(subscription, 1000);
+    cheat_caller_address(subscription.contract_address, USER1(), CheatSpan::TargetCalls(1));
+    subscription.subscribe(plan_id);
+
+    assert(token.balance_of(USER1()) == 0, 'subscriber should be charged');
+    assert(token.balance_of(RECIPIENT()) == price, 'recipient should be paid');
+    at(subscription, 1000);
+    assert(subscription.is_subscribed(USER1(), plan_id), 'subscription should be live');
+}
+
+#[test]
+fn test_paid_renew_transfers_tokens() {
+    let subscription = deploy_subscription();
+    let token = deploy_erc20();
+    let price: u256 = 250;
+    let plan_id = create_paid_plan(subscription, CREATOR1(), token.contract_address, price);
+
+    fund_and_approve(token, USER1(), subscription.contract_address, 2 * price);
+
+    at(subscription, 1000);
+    cheat_caller_address(subscription.contract_address, USER1(), CheatSpan::TargetCalls(1));
+    subscription.subscribe(plan_id);
+
+    at(subscription, 2000);
+    cheat_caller_address(subscription.contract_address, USER1(), CheatSpan::TargetCalls(1));
+    subscription.renew_subscription(plan_id);
+
+    assert(token.balance_of(RECIPIENT()) == 2 * price, 'recipient paid twice');
+    let record = subscription.get_subscription(USER1(), plan_id);
+    assert(record.expires_at == 1000 + 2 * HOUR, 'expiry should stack');
+}
+
+#[test]
+#[should_panic]
+fn test_paid_subscribe_without_allowance_reverts() {
+    let subscription = deploy_subscription();
+    let token = deploy_erc20();
+    let plan_id = create_paid_plan(subscription, CREATOR1(), token.contract_address, 250);
+
+    cheat_caller_address(subscription.contract_address, USER1(), CheatSpan::TargetCalls(1));
+    subscription.subscribe(plan_id);
+}
+
+// A malicious payment token that reenters `subscribe` during `transfer_from`
+// runs under its own caller context: it can only create a subscription for
+// itself. The victim's record is written before the external call
+// (checks-effects-interactions), so state stays consistent without a lock.
+#[test]
+fn test_reentrant_payment_token_is_isolated() {
+    let subscription = deploy_subscription();
+    let free_plan = create_free_plan(subscription, CREATOR1());
+    let reentrant_token = deploy_reentrant_payment_token(subscription.contract_address, free_plan);
+
+    let paid_plan = create_paid_plan(subscription, CREATOR1(), reentrant_token, 250);
+
+    at(subscription, 1000);
+    cheat_caller_address(subscription.contract_address, USER1(), CheatSpan::TargetCalls(1));
+    subscription.subscribe(paid_plan);
+
+    at(subscription, 1000);
+    assert(subscription.is_subscribed(USER1(), paid_plan), 'victim sub should be intact');
+    at(subscription, 1000);
+    assert(!subscription.is_subscribed(USER1(), free_plan), 'no sub forged for victim');
+    at(subscription, 1000);
+    let token_address: ContractAddress = reentrant_token;
+    assert(subscription.is_subscribed(token_address, free_plan), 'token only subscribed itself');
+}
+
+// --- views / discovery ---
+
+#[test]
+fn test_supports_subscription_interface() {
+    let subscription = deploy_subscription();
+    let src5 = ISRC5Dispatcher { contract_address: subscription.contract_address };
+    assert(src5.supports_interface(IIP_SUBSCRIPTION_ID), 'SRC5 id should be registered');
 }
 
 #[test]
 #[should_panic(expected: 'Plan does not exist')]
 fn test_missing_plan_reverts() {
-    let subscription = deploy_subscription(OWNER());
+    let subscription = deploy_subscription();
+    subscription.get_plan(42);
+}
 
-    subscription.get_plan(1);
+#[test]
+#[should_panic(expected: 'Subscription does not exist')]
+fn test_missing_subscription_reverts() {
+    let subscription = deploy_subscription();
+    let plan_id = create_free_plan(subscription, CREATOR1());
+    subscription.get_subscription(USER1(), plan_id);
 }

@@ -1,4 +1,66 @@
-# IP Subscription Audit And Remediation Report
+# IP Subscription — v2 Redesign Audit (2026-06-10)
+
+**Date:** 2026-06-10
+**Scope:** Principle-conformance audit of the post-2026-05-23 implementation, followed by the v2 redesign in this tree.
+**Result:** v2 implemented; `scarb build` clean; `snforge test` 27 passed, 0 failed.
+
+## Why a v2
+
+The 2026-05-23 remediation produced a sound state machine (payment collection,
+expiry-derived status, sequential IDs, CEI ordering — all verified again before
+this redesign; 22/22 legacy tests passed). The remaining findings were
+conformance gaps against the Mediolano principles, which are stricter than what
+that audit measured:
+
+| # | Severity | Finding | v2 resolution |
+| --- | --- | --- | --- |
+| A1 | High (ownerless primitives) | Contract had an `owner` who alone could create plans — a per-creator, admin-gated deployment, unlike siblings `IP-Club` / `IP-Time-Capsule` | Owner removed. `create_plan` permissionless; `plan.creator` recorded per plan; only the plan creator can toggle that plan |
+| A2 | Medium (data minimization) | `subscriber_plan_ids` stored an enumerable on-chain subscriber roster serving only a convenience view; unbounded Vec | Removed. Indexers rebuild views from keyed events; data not held cannot be compelled |
+| A3 | Low | `tier: felt252` stored but never enforced — display data in storage | Removed; tier naming belongs in the plan's content-addressed `metadata_uri` |
+| B1 | Medium | `unsubscribe` set `expires_at = now`, forfeiting access the subscriber had paid for; with no on-chain auto-renew there is nothing to cancel | Function removed. Paid time always runs to expiry; no code path can shorten it |
+| B2 | Medium | `switch_subscription` had the same forfeiture (instant kill, zero credit, full new price) and duplicated `subscribe` | Function removed; account abstraction composes the same outcome as a multicall |
+| B3 | Low | Renewal stacking lets subscribers prepay indefinitely at the plan's immutable price | Kept, now documented as intended (terms immutability makes it safe) |
+| B4 | Low | Deactivation semantics were implicit | Decided + tested: `set_plan_active(false)` blocks new subscriptions **and** renewals; existing paid access is preserved (`test_deactivation_preserves_paid_access`) |
+| B5 | Info | Manual reentrancy lock was redundant (CEI already final before the external call) and cost two storage writes per paid op; records duplicated their own map keys | Lock removed with rationale tested (`test_reentrant_payment_token_is_isolated`: a malicious token reenters under its own caller context and can only subscribe itself); `SubscriptionRecord` reduced to `{ started_at, expires_at }` |
+
+## v2 invariants
+
+1. **Permissionless**: any caller can create a plan; any caller can subscribe to an active plan.
+2. **Ownerless / immutable**: no contract owner, no admin, no upgrade path, no fee. Plan economic terms never change; new terms = new plan.
+3. **Paid time is inviolable**: no function — including the plan creator's — can reduce an existing `expires_at`.
+4. **Disjoint verbs**: `subscribe` requires no active subscription; `renew_subscription` requires one. Exactly one of the two applies at any moment.
+5. **CEI**: subscription state is final before the ERC-20 `transfer_from`; a reverting payment reverts the whole transaction.
+6. **Minimal storage**: a subscription is two `u64` timestamps; existence is `expires_at != 0`; no enumerable rosters.
+
+## Interface changes (v1 → v2)
+
+- Removed: `unsubscribe`, `switch_subscription`, `get_owner`, `get_user_plan_ids`, constructor `owner` arg, `tier` param.
+- Changed: `PlanRecord` gains `creator`, drops `id`/`tier`; `SubscriptionRecord` is `{ started_at, expires_at }`; `renew_subscription` requires an *active* subscription (expired ones restart via `subscribe`).
+- New SRC5 ID (interface changed): `0x013f7d8dc8964bc1dc290304c1f2641165381c97e48c9f1497f90a93f7d513ac` = `starknet_keccak("mediolano.ip-subscription.v2")`.
+
+## Verification
+
+```bash
+scarb fmt && scarb build   # clean
+snforge test               # 27 passed, 0 failed
+```
+
+Coverage highlights: permissionless creation by two creators; creator-only
+toggle; deactivation blocking subscribe + renew while preserving paid access;
+expiry boundary (`expires_at` second inclusive); renewal stacking; paid
+subscribe/renew balance assertions; allowance-failure revert; reentrant-token
+isolation; SRC5 discovery; missing-record reverts.
+
+## Production recommendation
+
+Materially smaller surface than v1 (4 state-changing functions, no admin
+paths). Before mainnet deployment: external review, deployment rehearsal
+(declare/deploy, verify class hash), and registry/doctrine review for the
+service entry. The prior v1 report below is retained for history.
+
+---
+
+# IP Subscription Audit And Remediation Report (v1, historical)
 
 **Date:** 2026-05-23
 **Package:** `contracts/IP-Subscription`

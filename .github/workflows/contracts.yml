@@ -1,0 +1,82 @@
+name: contracts
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+jobs:
+  detect:
+    runs-on: ubuntu-latest
+    outputs:
+      dirs: ${{ steps.changed.outputs.dirs }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      # Only contracts touched by the change are built and tested — the
+      # catalog contains legacy packages that predate the redesign effort
+      # and are not expected to build until their own redesign PR.
+      - id: changed
+        shell: bash
+        run: |
+          if [ "${{ github.event_name }}" = "pull_request" ]; then
+            BASE="origin/${{ github.base_ref }}"
+          else
+            BASE="${{ github.event.before }}"
+            git cat-file -e "$BASE" 2>/dev/null || BASE="HEAD~1"
+          fi
+          DIRS=$(git diff --name-only "$BASE"...HEAD -- 'contracts/**' \
+            | cut -d/ -f1-2 | sort -u \
+            | while read -r d; do [ -f "$d/Scarb.toml" ] && echo "$d"; done \
+            | jq -R -s -c 'split("\n") | map(select(length > 0))')
+          echo "dirs=${DIRS:-[]}" >> "$GITHUB_OUTPUT"
+          echo "Changed contract dirs: ${DIRS:-[]}"
+
+  build-and-test:
+    needs: detect
+    if: needs.detect.outputs.dirs != '[]'
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        dir: ${{ fromJson(needs.detect.outputs.dirs) }}
+    name: ${{ matrix.dir }}
+    defaults:
+      run:
+        working-directory: ${{ matrix.dir }}
+    steps:
+      - uses: actions/checkout@v4
+
+      # Versions come from the contract's .tool-versions when present;
+      # otherwise the repo-wide baseline (scarb 2.17.0 / snforge 0.59.0).
+      - id: versions
+        shell: bash
+        run: |
+          SCARB="2.17.0"; FOUNDRY="0.59.0"
+          if [ -f .tool-versions ]; then
+            S=$(awk '$1 == "scarb" { print $2 }' .tool-versions)
+            F=$(awk '$1 == "starknet-foundry" { print $2 }' .tool-versions)
+            [ -n "$S" ] && SCARB="$S"
+            [ -n "$F" ] && FOUNDRY="$F"
+          fi
+          echo "scarb=$SCARB" >> "$GITHUB_OUTPUT"
+          echo "foundry=$FOUNDRY" >> "$GITHUB_OUTPUT"
+
+      - uses: software-mansion/setup-scarb@v1
+        with:
+          scarb-version: ${{ steps.versions.outputs.scarb }}
+
+      - uses: foundry-rs/setup-snfoundry@v3
+        with:
+          starknet-foundry-version: ${{ steps.versions.outputs.foundry }}
+
+      - name: Format check
+        run: scarb fmt --check
+
+      - name: Build
+        run: scarb build
+
+      - name: Test
+        run: snforge test

@@ -1,8 +1,10 @@
 use starknet::ContractAddress;
 use crate::types::{TicketData, TicketSeries};
 
+// Protocol discovery ID registered via SRC5.
+// Derivation: starknet_keccak("mediolano.ip-tickets.v2").
 pub const IIP_TICKET_SERVICE_ID: felt252 =
-    0x0064383abff0b2487b1c4acd681d761b39c91cc025a43bf0f7a355641b7c644f;
+    0x01362a7858e49627a551fd488764bb296e2e74caaffd1d6a171580904c90c344;
 
 #[starknet::interface]
 pub trait IIPTicketService<TContractState> {
@@ -15,6 +17,8 @@ pub trait IIPTicketService<TContractState> {
         payment_token: Option<ContractAddress>,
         metadata_uri: ByteArray,
     ) -> u256;
+
+    fn set_series_active(ref self: TContractState, series_id: u256, active: bool);
 
     fn mint_ticket(ref self: TContractState, series_id: u256) -> u256;
 
@@ -35,6 +39,10 @@ pub trait IIPTicketService<TContractState> {
     fn get_last_series_id(self: @TContractState) -> u256;
 
     fn total_supply(self: @TContractState) -> u256;
+
+    fn royalty_info(
+        self: @TContractState, token_id: u256, sale_price: u256,
+    ) -> (ContractAddress, u256);
 
     fn royaltyInfo(
         self: @TContractState, token_id: u256, sale_price: u256,

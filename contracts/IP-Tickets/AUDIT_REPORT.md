@@ -1,3 +1,58 @@
+# IP Tickets — v2 Redesign Audit (2026-06-10)
+
+**Date:** 2026-06-10
+**Scope:** Principle-conformance audit of the post-2026-05-23 implementation, followed by the v2 redesign in this tree.
+**Result:** v2 implemented; `scarb build` clean; `snforge test` 26 passed, 0 failed.
+
+## Why a v2
+
+Unlike IP-Subscription, the 2026-05-23 IP-Tickets remediation already satisfied
+the load-bearing Mediolano principles: permissionless series creation, no
+contract owner, zero fees, direct creator payment, standard ERC-721 interop,
+content-addressed metadata. The v2 findings are correspondingly smaller:
+
+| # | Severity | Finding | v2 resolution |
+| --- | --- | --- | --- |
+| T1 | Medium | No way for a creator to stop sales of a series (e.g. a cancelled event) — expiration was the only sunset | `set_series_active(series_id, active)` added: series-creator-only, gates **minting only**. Existing tickets keep access, transferability, and redemption (tested) — mirrors the IP-Subscription v2 deactivation decision |
+| T2 | Medium | `royaltyInfo` was camelCase-only and the ERC-2981 interface ID was not registered in SRC5, so royalty-aware marketplaces could not discover it | `IERC2981_ID` registered in the constructor; snake_case `royalty_info` added alongside the legacy camelCase entry point |
+| T3 | Low | Manual `mint_locked` reentrancy lock was redundant: all series/token state is written before `collect_payment` and `safe_mint` (checks-effects-interactions), and a reentrant call runs under its own caller context | Lock removed; `test_reentrant_payment_token_reverts_atomically` documents the failure mode (the reentrant token can only mint to itself, it is not an ERC-721 receiver, the whole tx reverts, the buyer is never charged) |
+| T4 | Low | `TicketSeries.id` and `.exists` duplicated the map key / derivable state; wasted `redeemed_tickets.write(false)` on every mint | Both fields dropped (existence = `creator != 0`); wasted write removed |
+| T5 | Info | `panic!` ByteArray errors in two branches, inconsistent with felt252 asserts | Replaced with felt252 asserts; `collect_payment` unwraps under the create-time invariant (paid series always carries a non-zero token) |
+| T6 | Info (documented, not changed) | Redeemed/expired tickets remain transferable ERC-721s that no longer grant access — a secondary buyer could overpay for a worthless ticket | Kept by design (standard-interop over lock-in); README now states loudly that integrators must surface `get_ticket_data().valid` on secondary listings |
+| T7 | Info (deferred) | Redemption events publicly link wallet → attendance. Privacy-preserving redemption (ZK entitlement proofs) is a commercial-layer concern, not a substrate concern | Out of scope for the public primitive; tracked in the Medialane privacy-model work |
+
+## v2 invariants
+
+1. **Permissionless**: anyone creates series; anyone mints from an active, unexpired, unsold-out series.
+2. **Ownerless / immutable**: no contract owner, no admin, no upgrade path, no fee. Series terms (price, supply, expiration, royalty, token) never change.
+3. **Sold tickets are inviolable**: nothing the series creator does (including deactivation) affects access, transfer, or redemption of existing tickets.
+4. **CEI**: all storage writes precede the external calls in `mint_ticket`; a reverting payment or receiver check reverts the whole transaction.
+5. **One accounting source**: `active_ticket_balance` is maintained exclusively by the ERC-721 transfer hook and `redeem_ticket`; redeemed tickets are excluded from hook accounting.
+
+## Interface changes (v1 → v2)
+
+- Added: `set_series_active(series_id, active)`, snake_case `royalty_info`, `SeriesStatusUpdated` event, ERC-2981 SRC5 registration.
+- Changed: `TicketSeries` drops `id`/`exists`, gains `active`.
+- New SRC5 ID (interface changed): `0x01362a7858e49627a551fd488764bb296e2e74caaffd1d6a171580904c90c344` = `starknet_keccak("mediolano.ip-tickets.v2")`.
+
+## Verification
+
+```bash
+scarb fmt && scarb build   # clean
+snforge test               # 26 passed, 0 failed
+```
+
+New coverage: creator-only toggle, deactivation blocks mint, deactivation
+preserves access/transfer/redemption, reactivation, snake_case royalty,
+ERC-2981 SRC5 discovery, atomic revert on reentrant payment token.
+
+## Production recommendation
+
+Pre-production until external review and deployment rehearsal. The v1 report
+below is retained for history.
+
+---
+
 # IP Tickets Audit And Remediation Report
 
 **Date:** 2026-05-23

@@ -4,6 +4,26 @@
 
 Tickets are indexable and transferable ERC-721 assets. Access follows current ownership until the ticket expires or is redeemed.
 
+## Design (v2, 2026-06-10)
+
+The v2 redesign tightens the contract against the Mediolano principles:
+
+- **Still permissionless and ownerless** (as in v1): anyone creates a series;
+  the contract has no admin, no upgrade path, and takes no fee. Payments flow
+  directly from buyer to the series creator.
+- **Creator sales switch.** `set_series_active(series_id, active)` (series
+  creator only) gates **minting only** — existing tickets keep their access,
+  stay transferable, and stay redeemable. Mirrors IP-Subscription v2: a
+  creator can stop new money (cancelled event), never confiscate sold assets.
+- **CEI instead of a lock.** Series/token state is final before the payment
+  transfer and `safe_mint`; the manual reentrancy lock is removed. A reentrant
+  call runs under its own caller context against consistent storage.
+- **Royalty discovery.** The ERC-2981 interface ID is registered via SRC5 and
+  `royalty_info` is exposed in snake_case alongside the legacy `royaltyInfo`.
+- **Leaner records.** `TicketSeries` drops its redundant `id`/`exists` fields
+  (existence is `creator != 0`); the wasted `redeemed=false` write on mint is
+  gone.
+
 ## Service Asset Declaration
 
 This service follows the shared doctrine in [`docs/SERVICE_ASSET_DOCTRINE.md`](../../docs/SERVICE_ASSET_DOCTRINE.md).
@@ -17,7 +37,7 @@ This service follows the shared doctrine in [`docs/SERVICE_ASSET_DOCTRINE.md`](.
 | `access_semantics` | Current ownership of at least one unredeemed, unexpired ticket in a series |
 | `marketplace_visibility` | Display and list as ERC721 tickets |
 | `metadata_uri_policy` | `ipfs://` or `ar://` |
-| `src5_interface_id` | `IIP_TICKET_SERVICE_ID` |
+| `src5_interface_id` | `IIP_TICKET_SERVICE_ID` (`starknet_keccak("mediolano.ip-tickets.v2")`) + `IERC2981_ID` |
 
 ## Features
 
@@ -46,6 +66,7 @@ fn create_ticket_series(
     metadata_uri: ByteArray,
 ) -> u256;
 
+fn set_series_active(series_id: u256, active: bool); // series creator only
 fn mint_ticket(series_id: u256) -> u256;
 fn redeem_ticket(token_id: u256);
 
@@ -56,6 +77,7 @@ fn get_ticket_series_id(token_id: u256) -> u256;
 fn get_active_ticket_balance(user: ContractAddress, series_id: u256) -> u256;
 fn get_last_series_id() -> u256;
 fn total_supply() -> u256;
+fn royalty_info(token_id: u256, sale_price: u256) -> (ContractAddress, u256);
 fn royaltyInfo(token_id: u256, sale_price: u256) -> (ContractAddress, u256);
 ```
 
@@ -63,7 +85,7 @@ Custom SRC5 interface ID:
 
 ```cairo
 IIP_TICKET_SERVICE_ID =
-0x0064383abff0b2487b1c4acd681d761b39c91cc025a43bf0f7a355641b7c644f
+0x01362a7858e49627a551fd488764bb296e2e74caaffd1d6a171580904c90c344
 ```
 
 ## Access Semantics
@@ -71,12 +93,15 @@ IIP_TICKET_SERVICE_ID =
 A user has valid access when:
 
 ```text
-series.exists
+series.creator != 0
 && get_block_timestamp() < series.expiration
 && active_ticket_balance[(user, series_id)] > 0
 ```
 
-Transfers move active access for unredeemed tickets. Redeemed tickets remain ERC-721 assets but no longer grant access.
+Transfers move active access for unredeemed tickets. **Redeemed or expired
+tickets remain transferable ERC-721 assets but no longer grant access** —
+marketplaces and buyers must check `get_ticket_data(token_id).valid` before
+pricing a secondary sale. Deactivating a series blocks minting only.
 
 ## Development
 

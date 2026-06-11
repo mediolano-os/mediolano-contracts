@@ -2,6 +2,7 @@
 pub mod IPTicketService {
     use core::num::traits::Zero;
     use openzeppelin_introspection::src5::SRC5Component;
+    use openzeppelin_token::common::erc2981::interface::IERC2981_ID;
     use openzeppelin_token::erc20::interface::{IERC20Dispatcher, IERC20DispatcherTrait};
     use openzeppelin_token::erc721::ERC721Component;
     use openzeppelin_token::erc721::interface::{IERC721Metadata, IERC721MetadataCamelOnly};
@@ -39,7 +40,6 @@ pub mod IPTicketService {
         token_to_series: Map<u256, u256>,
         active_ticket_balance: Map<(ContractAddress, u256), u256>,
         redeemed_tickets: Map<u256, bool>,
-        mint_locked: bool,
     }
 
     #[event]
@@ -50,8 +50,17 @@ pub mod IPTicketService {
         #[flat]
         SRC5Event: SRC5Component::Event,
         TicketSeriesCreated: TicketSeriesCreated,
+        SeriesStatusUpdated: SeriesStatusUpdated,
         TicketMinted: TicketMinted,
         TicketRedeemed: TicketRedeemed,
+    }
+
+    #[derive(Drop, starknet::Event)]
+    pub struct SeriesStatusUpdated {
+        #[key]
+        pub series_id: u256,
+        pub active: bool,
+        pub updated_at: u64,
     }
 
     #[derive(Drop, starknet::Event)]
@@ -99,6 +108,7 @@ pub mod IPTicketService {
         // Token URI is resolved per ticket from its ticket series.
         self.erc721.initializer(name, symbol, "");
         self.src5.register_interface(IIP_TICKET_SERVICE_ID);
+        self.src5.register_interface(IERC2981_ID);
         self.next_token_id.write(1);
     }
 
@@ -192,16 +202,12 @@ pub mod IPTicketService {
             if price == 0 {
                 assert(payment_token.is_none(), 'Free ticket cannot use token');
             } else {
-                let token = match payment_token {
-                    Option::Some(token) => token,
-                    Option::None => panic!("Paid ticket requires token"),
-                };
-                assert(!token.is_zero(), 'Payment token is zero');
+                assert(payment_token.is_some(), 'Paid ticket requires token');
+                assert(!payment_token.unwrap().is_zero(), 'Payment token is zero');
             }
 
             let series_id = self.last_series_id.read() + 1;
             let series = TicketSeries {
-                id: series_id,
                 creator,
                 price,
                 max_supply,
@@ -210,7 +216,7 @@ pub mod IPTicketService {
                 royalty_bps,
                 payment_token,
                 metadata_uri: metadata_uri.clone(),
-                exists: true,
+                active: true,
             };
 
             self.ticket_series.write(series_id, series);
@@ -234,16 +240,26 @@ pub mod IPTicketService {
             series_id
         }
 
+        fn set_series_active(ref self: ContractState, series_id: u256, active: bool) {
+            let mut series = self.ticket_series.read(series_id);
+            assert(!series.creator.is_zero(), 'Ticket series does not exist');
+            assert(get_caller_address() == series.creator, 'Only series creator');
+
+            series.active = active;
+            self.ticket_series.write(series_id, series);
+
+            self.emit(SeriesStatusUpdated { series_id, active, updated_at: get_block_timestamp() });
+        }
+
         fn mint_ticket(ref self: ContractState, series_id: u256) -> u256 {
             let mut series = self.ticket_series.read(series_id);
-            assert(series.exists, 'Ticket series does not exist');
+            assert(!series.creator.is_zero(), 'Ticket series does not exist');
+            assert(series.active, 'Series is inactive');
             assert(get_block_timestamp() < series.expiration, 'Ticket series expired');
             assert(series.minted < series.max_supply, 'Max supply reached');
 
             let caller = get_caller_address();
             assert(!caller.is_zero(), 'Recipient is zero address');
-
-            self.enter_mint();
 
             series.minted += 1;
             self.ticket_series.write(series_id, series.clone());
@@ -251,13 +267,15 @@ pub mod IPTicketService {
             let token_id = self.next_token_id.read();
             self.next_token_id.write(token_id + 1);
             self.token_to_series.write(token_id, series_id);
-            self.redeemed_tickets.write(token_id, false);
             self.total_supply.write(self.total_supply.read() + 1);
 
+            // State is final before the external calls (checks-effects-
+            // interactions); a reentrant call from the payment token or the
+            // receiver callback runs under its own caller context against
+            // consistent storage.
             collect_payment(caller, @series);
 
             self.erc721.safe_mint(caller, token_id, array![].span());
-            self.exit_mint();
 
             self
                 .emit(
@@ -296,7 +314,7 @@ pub mod IPTicketService {
 
         fn has_valid_ticket(self: @ContractState, user: ContractAddress, series_id: u256) -> bool {
             let series = self.ticket_series.read(series_id);
-            if !series.exists {
+            if series.creator.is_zero() {
                 return false;
             }
             if get_block_timestamp() >= series.expiration {
@@ -307,7 +325,7 @@ pub mod IPTicketService {
 
         fn get_ticket_series(self: @ContractState, series_id: u256) -> TicketSeries {
             let series = self.ticket_series.read(series_id);
-            assert(series.exists, 'Ticket series does not exist');
+            assert(!series.creator.is_zero(), 'Ticket series does not exist');
             series
         }
 
@@ -316,7 +334,9 @@ pub mod IPTicketService {
             let series_id = self.token_to_series.read(token_id);
             let series = self.ticket_series.read(series_id);
             let redeemed = self.redeemed_tickets.read(token_id);
-            let valid = series.exists && !redeemed && get_block_timestamp() < series.expiration;
+            let valid = !series.creator.is_zero()
+                && !redeemed
+                && get_block_timestamp() < series.expiration;
 
             TicketData {
                 token_id,
@@ -349,36 +369,34 @@ pub mod IPTicketService {
             self.total_supply.read()
         }
 
+        fn royalty_info(
+            self: @ContractState, token_id: u256, sale_price: u256,
+        ) -> (ContractAddress, u256) {
+            compute_royalty(self, token_id, sale_price)
+        }
+
         fn royaltyInfo(
             self: @ContractState, token_id: u256, sale_price: u256,
         ) -> (ContractAddress, u256) {
-            self.erc721._require_owned(token_id);
-            let series_id = self.token_to_series.read(token_id);
-            let series = self.ticket_series.read(series_id);
-            let royalty_amount = (sale_price * series.royalty_bps) / 10000;
-            (series.creator, royalty_amount)
+            compute_royalty(self, token_id, sale_price)
         }
     }
 
-    #[generate_trait]
-    impl InternalImpl of InternalTrait {
-        fn enter_mint(ref self: ContractState) {
-            assert(!self.mint_locked.read(), 'Reentrant mint');
-            self.mint_locked.write(true);
-        }
-
-        fn exit_mint(ref self: ContractState) {
-            self.mint_locked.write(false);
-        }
+    fn compute_royalty(
+        self: @ContractState, token_id: u256, sale_price: u256,
+    ) -> (ContractAddress, u256) {
+        self.erc721._require_owned(token_id);
+        let series_id = self.token_to_series.read(token_id);
+        let series = self.ticket_series.read(series_id);
+        let royalty_amount = (sale_price * series.royalty_bps) / 10000;
+        (series.creator, royalty_amount)
     }
 
     fn collect_payment(payer: ContractAddress, series: @TicketSeries) {
         if *series.price > 0 {
-            let payment_token = match *series.payment_token {
-                Option::Some(token) => token,
-                Option::None => panic!("Payment token missing"),
-            };
-            let token = IERC20Dispatcher { contract_address: payment_token };
+            // create_ticket_series guarantees a paid series carries a
+            // non-zero payment token, and series terms are immutable.
+            let token = IERC20Dispatcher { contract_address: (*series.payment_token).unwrap() };
             let result = token.transfer_from(payer, *series.creator, *series.price);
             assert(result, 'Token Transfer Failed');
         }

@@ -3,6 +3,7 @@ use ip_ticket::interface::{
 };
 use ip_ticket::mock::mock_erc20::{IERC20MintDispatcher, IERC20MintDispatcherTrait};
 use openzeppelin_introspection::interface::{ISRC5Dispatcher, ISRC5DispatcherTrait};
+use openzeppelin_token::common::erc2981::interface::IERC2981_ID;
 use openzeppelin_token::erc20::interface::{IERC20Dispatcher, IERC20DispatcherTrait};
 use openzeppelin_token::erc721::interface::{
     IERC721Dispatcher, IERC721DispatcherTrait, IERC721MetadataDispatcher,
@@ -153,7 +154,7 @@ fn test_create_ticket_series_rejects_bad_royalty() {
 }
 
 #[test]
-#[should_panic]
+#[should_panic(expected: 'Paid ticket requires token')]
 fn test_paid_ticket_requires_token() {
     let ticket_service = deploy_ticket_service();
 
@@ -334,9 +335,14 @@ fn test_royalty_info_rejects_missing_token() {
     ticket_service.royaltyInfo(999, 1000);
 }
 
+// Without a lock, a payment token reentering `mint_ticket` runs under its own
+// caller context: the inner mint targets the token contract itself, which is
+// not an ERC-721 receiver, so the whole transaction reverts atomically — the
+// buyer is never charged and no state is corrupted (checks-effects-
+// interactions: storage is consistent at the external call).
 #[test]
-#[should_panic(expected: 'Reentrant mint')]
-fn test_reentrant_payment_token_rejected() {
+#[should_panic]
+fn test_reentrant_payment_token_reverts_atomically() {
     let ticket_service = deploy_ticket_service();
     let expected_series_id = 1;
     let token = deploy_reentrant_payment_token(ticket_service.contract_address, expected_series_id);
@@ -351,9 +357,99 @@ fn test_reentrant_payment_token_rejected() {
 }
 
 #[test]
+#[should_panic(expected: 'Only series creator')]
+fn test_only_series_creator_can_toggle() {
+    let ticket_service = deploy_ticket_service();
+    let series_id = create_free_series(ticket_service, 10_000);
+
+    cheat_caller_address(ticket_service.contract_address, USER1(), CheatSpan::TargetCalls(1));
+    ticket_service.set_series_active(series_id, false);
+}
+
+#[test]
+#[should_panic(expected: 'Ticket series does not exist')]
+fn test_toggle_unknown_series_reverts() {
+    let ticket_service = deploy_ticket_service();
+
+    cheat_caller_address(ticket_service.contract_address, CREATOR(), CheatSpan::TargetCalls(1));
+    ticket_service.set_series_active(42, false);
+}
+
+#[test]
+#[should_panic(expected: 'Series is inactive')]
+fn test_deactivation_blocks_mint() {
+    let ticket_service = deploy_ticket_service();
+    let receiver = deploy_receiver();
+    let series_id = create_free_series(ticket_service, 10_000);
+
+    cheat_caller_address(ticket_service.contract_address, CREATOR(), CheatSpan::TargetCalls(1));
+    ticket_service.set_series_active(series_id, false);
+
+    cheat_caller_address(ticket_service.contract_address, receiver, CheatSpan::TargetCalls(1));
+    ticket_service.mint_ticket(series_id);
+}
+
+#[test]
+fn test_deactivation_preserves_existing_tickets() {
+    let ticket_service = deploy_ticket_service();
+    let receiver_1 = deploy_receiver();
+    let receiver_2 = deploy_receiver();
+    let series_id = create_free_series(ticket_service, 10_000);
+
+    cheat_caller_address(ticket_service.contract_address, receiver_1, CheatSpan::TargetCalls(1));
+    let token_id = ticket_service.mint_ticket(series_id);
+
+    cheat_caller_address(ticket_service.contract_address, CREATOR(), CheatSpan::TargetCalls(1));
+    ticket_service.set_series_active(series_id, false);
+
+    // Access, transfer, and redemption all survive deactivation.
+    assert(ticket_service.has_valid_ticket(receiver_1, series_id), 'access should survive');
+
+    let erc721 = IERC721Dispatcher { contract_address: ticket_service.contract_address };
+    cheat_caller_address(ticket_service.contract_address, receiver_1, CheatSpan::TargetCalls(1));
+    erc721.transfer_from(receiver_1, receiver_2, token_id);
+    assert(ticket_service.has_valid_ticket(receiver_2, series_id), 'transfer should survive');
+
+    cheat_caller_address(ticket_service.contract_address, receiver_2, CheatSpan::TargetCalls(1));
+    ticket_service.redeem_ticket(token_id);
+    assert(ticket_service.get_ticket_data(token_id).redeemed, 'redeem should survive');
+}
+
+#[test]
+fn test_reactivation_allows_mint() {
+    let ticket_service = deploy_ticket_service();
+    let receiver = deploy_receiver();
+    let series_id = create_free_series(ticket_service, 10_000);
+
+    cheat_caller_address(ticket_service.contract_address, CREATOR(), CheatSpan::TargetCalls(1));
+    ticket_service.set_series_active(series_id, false);
+    cheat_caller_address(ticket_service.contract_address, CREATOR(), CheatSpan::TargetCalls(1));
+    ticket_service.set_series_active(series_id, true);
+
+    cheat_caller_address(ticket_service.contract_address, receiver, CheatSpan::TargetCalls(1));
+    ticket_service.mint_ticket(series_id);
+    assert(ticket_service.has_valid_ticket(receiver, series_id), 'mint should work again');
+}
+
+#[test]
+fn test_royalty_info_snake_case() {
+    let ticket_service = deploy_ticket_service();
+    let receiver = deploy_receiver();
+    let series_id = create_free_series(ticket_service, 10_000);
+
+    cheat_caller_address(ticket_service.contract_address, receiver, CheatSpan::TargetCalls(1));
+    let token_id = ticket_service.mint_ticket(series_id);
+
+    let (recipient, amount) = ticket_service.royalty_info(token_id, 1000);
+    assert(recipient == CREATOR(), 'royalty recipient');
+    assert(amount == 50, 'royalty amount');
+}
+
+#[test]
 fn test_supports_ticket_service_interface() {
     let ticket_service = deploy_ticket_service();
     let src5 = ISRC5Dispatcher { contract_address: ticket_service.contract_address };
 
     assert(src5.supports_interface(IIP_TICKET_SERVICE_ID), 'interface supported');
+    assert(src5.supports_interface(IERC2981_ID), 'erc2981 supported');
 }

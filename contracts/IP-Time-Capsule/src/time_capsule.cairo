@@ -12,9 +12,8 @@
 pub mod IPTimeCapsule {
     use core::num::traits::Zero;
     use openzeppelin::introspection::src5::SRC5Component;
-    use openzeppelin::token::erc721::ERC721Component;
-    use openzeppelin::token::erc721::extensions::ERC721EnumerableComponent;
     use openzeppelin::token::erc721::interface::{IERC721Metadata, IERC721MetadataCamelOnly};
+    use openzeppelin::token::erc721::{ERC721Component, ERC721HooksEmptyImpl};
     use starknet::storage::{
         Map, StorageMapReadAccess, StorageMapWriteAccess, StoragePointerReadAccess,
         StoragePointerWriteAccess,
@@ -23,28 +22,20 @@ pub mod IPTimeCapsule {
     use crate::interfaces::{IIP_TIME_CAPSULE_ID, ITimeCapsule};
     use crate::types::{
         COMMITMENT_SCHEME_POSEIDON_HASH_SALT, MAX_NAME_LEN, MAX_SYMBOL_LEN, MAX_URI_LEN,
-        STATUS_REVEALED, STATUS_SEALED, TimeCapsule, TimeCapsuleData, compute_content_commitment,
-        is_supported_uri,
+        TimeCapsule, TimeCapsuleData, compute_content_commitment, is_supported_uri,
     };
 
     component!(path: ERC721Component, storage: erc721, event: ERC721Event);
     component!(path: SRC5Component, storage: src5, event: SRC5Event);
-    component!(
-        path: ERC721EnumerableComponent, storage: erc721_enumerable, event: ERC721EnumerableEvent,
-    );
 
     #[abi(embed_v0)]
     impl ERC721Impl = ERC721Component::ERC721Impl<ContractState>;
     #[abi(embed_v0)]
     impl ERC721CamelOnly = ERC721Component::ERC721CamelOnlyImpl<ContractState>;
     #[abi(embed_v0)]
-    impl ERC721EnumerableImpl =
-        ERC721EnumerableComponent::ERC721EnumerableImpl<ContractState>;
-    #[abi(embed_v0)]
     impl SRC5Impl = SRC5Component::SRC5Impl<ContractState>;
 
     impl ERC721InternalImpl = ERC721Component::InternalImpl<ContractState>;
-    impl ERC721EnumerableInternalImpl = ERC721EnumerableComponent::InternalImpl<ContractState>;
     impl SRC5InternalImpl = SRC5Component::InternalImpl<ContractState>;
 
     #[storage]
@@ -53,8 +44,6 @@ pub mod IPTimeCapsule {
         erc721: ERC721Component::Storage,
         #[substorage(v0)]
         src5: SRC5Component::Storage,
-        #[substorage(v0)]
-        erc721_enumerable: ERC721EnumerableComponent::Storage,
         next_token_id: u256,
         hidden_uri: ByteArray,
         max_lock_duration: u64,
@@ -68,8 +57,6 @@ pub mod IPTimeCapsule {
         ERC721Event: ERC721Component::Event,
         #[flat]
         SRC5Event: SRC5Component::Event,
-        #[flat]
-        ERC721EnumerableEvent: ERC721EnumerableComponent::Event,
         TimeCapsuleMinted: TimeCapsuleMinted,
         TimeCapsuleRevealed: TimeCapsuleRevealed,
     }
@@ -116,30 +103,10 @@ pub mod IPTimeCapsule {
         assert(max_lock_duration > 0, 'Invalid max lock');
 
         self.erc721.initializer(name, symbol, "");
-        self.erc721_enumerable.initializer();
         self.src5.register_interface(IIP_TIME_CAPSULE_ID);
         self.hidden_uri.write(hidden_uri);
         self.max_lock_duration.write(max_lock_duration);
         self.next_token_id.write(1);
-    }
-
-    impl ERC721HooksImpl of ERC721Component::ERC721HooksTrait<ContractState> {
-        fn before_update(
-            ref self: ERC721Component::ComponentState<ContractState>,
-            to: ContractAddress,
-            token_id: u256,
-            auth: ContractAddress,
-        ) {
-            let mut contract_state = self.get_contract_mut();
-            contract_state.erc721_enumerable.before_update(to, token_id);
-        }
-
-        fn after_update(
-            ref self: ERC721Component::ComponentState<ContractState>,
-            to: ContractAddress,
-            token_id: u256,
-            auth: ContractAddress,
-        ) {}
     }
 
     #[abi(embed_v0)]
@@ -155,7 +122,7 @@ pub mod IPTimeCapsule {
         fn token_uri(self: @ContractState, token_id: u256) -> ByteArray {
             self.erc721._require_owned(token_id);
             let capsule = self.capsules.read(token_id);
-            if capsule.status == STATUS_REVEALED {
+            if capsule.revealed_at != 0 {
                 capsule.revealed_uri
             } else {
                 self.hidden_uri.read()
@@ -168,7 +135,7 @@ pub mod IPTimeCapsule {
         fn tokenURI(self: @ContractState, tokenId: u256) -> ByteArray {
             self.erc721._require_owned(tokenId);
             let capsule = self.capsules.read(tokenId);
-            if capsule.status == STATUS_REVEALED {
+            if capsule.revealed_at != 0 {
                 capsule.revealed_uri
             } else {
                 self.hidden_uri.read()
@@ -201,13 +168,14 @@ pub mod IPTimeCapsule {
             let token_id = self.next_token_id.read();
             self.next_token_id.write(token_id + 1);
 
-            self.erc721.safe_mint(recipient, token_id, array![].span());
+            // Capsule state must be final before safe_mint: the receiver
+            // callback is an external call, and a reentrant observer must
+            // never see a minted token with an empty capsule record.
             self
                 .capsules
                 .write(
                     token_id,
                     TimeCapsule {
-                        token_id,
                         creator,
                         encrypted_uri: encrypted_uri.clone(),
                         content_commitment,
@@ -215,10 +183,10 @@ pub mod IPTimeCapsule {
                         revealed_uri: "",
                         revealed_at: 0,
                         content_hash: 0,
-                        content_salt: 0,
-                        status: STATUS_SEALED,
                     },
                 );
+
+            self.erc721.safe_mint(recipient, token_id, array![].span());
 
             self
                 .emit(
@@ -245,7 +213,15 @@ pub mod IPTimeCapsule {
         ) {
             self.erc721._require_owned(token_id);
             let capsule = self.capsules.read(token_id);
-            assert(capsule.status == STATUS_SEALED, 'Already revealed');
+            assert(capsule.revealed_at == 0, 'Already revealed');
+
+            let now = get_block_timestamp();
+            assert(now >= capsule.reveal_at, 'Not unlocked');
+
+            let caller = get_caller_address();
+            let owner = self.erc721.ERC721_owners.read(token_id);
+            assert(caller == capsule.creator || caller == owner, 'Not authorized');
+
             assert(
                 revealed_uri.len() <= MAX_URI_LEN && is_supported_uri(@revealed_uri),
                 'Invalid revealed URI',
@@ -258,19 +234,11 @@ pub mod IPTimeCapsule {
                 'Commitment mismatch',
             );
 
-            let now = get_block_timestamp();
-            assert(now >= capsule.reveal_at, 'Not unlocked');
-
-            let caller = get_caller_address();
-            let owner = self.erc721.ERC721_owners.read(token_id);
-            assert(caller == capsule.creator || caller == owner, 'Not authorized');
-
             self
                 .capsules
                 .write(
                     token_id,
                     TimeCapsule {
-                        token_id,
                         creator: capsule.creator,
                         encrypted_uri: capsule.encrypted_uri,
                         content_commitment: capsule.content_commitment,
@@ -278,8 +246,6 @@ pub mod IPTimeCapsule {
                         revealed_uri: revealed_uri.clone(),
                         revealed_at: now,
                         content_hash,
-                        content_salt,
-                        status: STATUS_REVEALED,
                     },
                 );
 
@@ -309,8 +275,7 @@ pub mod IPTimeCapsule {
                 revealed_uri: capsule.revealed_uri,
                 revealed_at: capsule.revealed_at,
                 content_hash: capsule.content_hash,
-                content_salt: capsule.content_salt,
-                status: capsule.status,
+                revealed: capsule.revealed_at != 0,
             }
         }
 
@@ -322,7 +287,7 @@ pub mod IPTimeCapsule {
         fn get_revealed_uri(self: @ContractState, token_id: u256) -> ByteArray {
             self.erc721._require_owned(token_id);
             let capsule = self.capsules.read(token_id);
-            assert(capsule.status == STATUS_REVEALED, 'Not revealed');
+            assert(capsule.revealed_at != 0, 'Not revealed');
             capsule.revealed_uri
         }
 
@@ -343,7 +308,7 @@ pub mod IPTimeCapsule {
 
         fn is_revealed(self: @ContractState, token_id: u256) -> bool {
             self.erc721._require_owned(token_id);
-            self.capsules.read(token_id).status == STATUS_REVEALED
+            self.capsules.read(token_id).revealed_at != 0
         }
 
         fn get_hidden_uri(self: @ContractState) -> ByteArray {

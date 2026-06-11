@@ -1,14 +1,8 @@
 use ip_time_capsule::interfaces::{
     IIP_TIME_CAPSULE_ID, ITimeCapsuleDispatcher, ITimeCapsuleDispatcherTrait,
 };
-use ip_time_capsule::types::{
-    COMMITMENT_SCHEME_POSEIDON_HASH_SALT, STATUS_REVEALED, STATUS_SEALED,
-    compute_content_commitment,
-};
+use ip_time_capsule::types::{COMMITMENT_SCHEME_POSEIDON_HASH_SALT, compute_content_commitment};
 use openzeppelin::introspection::interface::{ISRC5Dispatcher, ISRC5DispatcherTrait};
-use openzeppelin::token::erc721::extensions::erc721_enumerable::interface::{
-    IERC721EnumerableDispatcher, IERC721EnumerableDispatcherTrait,
-};
 use openzeppelin::token::erc721::interface::{
     IERC721Dispatcher, IERC721DispatcherTrait, IERC721MetadataDispatcher,
     IERC721MetadataDispatcherTrait,
@@ -71,10 +65,6 @@ fn IERC721_ID() -> felt252 {
     0x33eb2f84c309543403fd69f0d0f363781ef06ef6faeb0131ff16ea3175bd943
 }
 
-fn IERC721_ENUMERABLE_ID() -> felt252 {
-    0x16bc0f502eeaf65ce0b3acb5eea656e2f26979ce6750e8502a82f377e538c87
-}
-
 fn deploy_contract() -> (ITimeCapsuleDispatcher, ContractAddress) {
     let contract = declare("IPTimeCapsule").unwrap().contract_class();
     let name: ByteArray = "IP Time Capsule";
@@ -96,6 +86,12 @@ fn deploy_mock_account() -> ContractAddress {
 
 fn deploy_receiver() -> ContractAddress {
     let contract = declare("Receiver").unwrap().contract_class();
+    let (address, _) = contract.deploy(@array![]).unwrap();
+    address
+}
+
+fn deploy_probing_receiver() -> ContractAddress {
+    let contract = declare("ProbingReceiver").unwrap().contract_class();
     let (address, _) = contract.deploy(@array![]).unwrap();
     address
 }
@@ -165,7 +161,7 @@ fn test_mint_capsule_records_commitment_and_hidden_token_uri() {
     assert(capsules.get_token_creator(token_id) == user1, 'creator mismatch');
     assert(capsules.get_token_reveal_at(token_id) == reveal_at, 'reveal_at mismatch');
     assert(data.content_commitment == COMMITMENT(), 'commitment mismatch');
-    assert(data.status == STATUS_SEALED, 'status mismatch');
+    assert(!data.revealed, 'should be sealed');
 }
 
 #[test]
@@ -298,9 +294,9 @@ fn test_reveal_after_unlock_updates_token_uri() {
     assert(capsules.is_revealed(token_id), 'should be revealed');
     assert(capsules.get_revealed_uri(token_id) == REVEALED_URI(), 'revealed uri mismatch');
     assert(meta.token_uri(token_id) == REVEALED_URI(), 'token uri should reveal');
-    assert(data.status == STATUS_REVEALED, 'status mismatch');
+    assert(data.revealed, 'should be revealed');
+    assert(data.revealed_at == 1000, 'revealed_at mismatch');
     assert(data.content_hash == CONTENT_HASH(), 'hash mismatch');
-    assert(data.content_salt == CONTENT_SALT(), 'salt mismatch');
 }
 
 #[test]
@@ -342,7 +338,7 @@ fn test_current_owner_can_reveal_after_transfer() {
     let data = capsules.get_capsule_data(token_id);
     assert(data.owner == user2, 'owner should update');
     assert(data.creator == user1, 'creator preserved');
-    assert(data.status == STATUS_REVEALED, 'status mismatch');
+    assert(data.revealed, 'should be revealed');
 }
 
 #[test]
@@ -355,24 +351,6 @@ fn test_reveal_twice_rejected() {
         capsules, address, user1, token_id, REVEALED_URI(), CONTENT_HASH(), CONTENT_SALT(), 1000,
     );
     reveal_as(capsules, address, user1, token_id, AR_URI(), CONTENT_HASH(), CONTENT_SALT(), 1001);
-}
-
-#[test]
-fn test_enumerable_tracks_mints_and_transfers() {
-    let (capsules, address, user1, user2) = setup();
-    let id1 = mint_as(capsules, address, user1, user1, ENCRYPTED_URI(), COMMITMENT(), 1000);
-    let id2 = mint_as(capsules, address, user1, user1, AR_URI(), 0x222, 1001);
-    let enumerable = IERC721EnumerableDispatcher { contract_address: address };
-    let erc721 = IERC721Dispatcher { contract_address: address };
-
-    assert(enumerable.total_supply() == 2, 'total supply mismatch');
-    assert(enumerable.token_of_owner_by_index(user1, 0) == id1, 'owner idx 0 mismatch');
-    assert(enumerable.token_of_owner_by_index(user1, 1) == id2, 'owner idx 1 mismatch');
-
-    cheat_caller_address(address, user1, CheatSpan::TargetCalls(1));
-    erc721.transfer_from(user1, user2, id1);
-
-    assert(enumerable.token_of_owner_by_index(user2, 0) == id1, 'user2 token mismatch');
 }
 
 #[test]
@@ -400,7 +378,6 @@ fn test_supports_interfaces() {
     let src5 = ISRC5Dispatcher { contract_address: address };
 
     assert(src5.supports_interface(IERC721_ID()), 'missing erc721');
-    assert(src5.supports_interface(IERC721_ENUMERABLE_ID()), 'missing enumerable');
     assert(src5.supports_interface(IIP_TIME_CAPSULE_ID), 'missing time capsule');
 }
 
@@ -429,4 +406,20 @@ fn test_get_revealed_uri_before_reveal_rejected() {
     let token_id = mint_as(capsules, address, user1, user1, ENCRYPTED_URI(), COMMITMENT(), 1000);
 
     capsules.get_revealed_uri(token_id);
+}
+
+// The probing receiver reads the capsule from inside the safe_mint callback
+// and reverts if the commitment is empty — proving capsule state is written
+// before the external receiver call (CEI ordering in mint_capsule).
+#[test]
+fn test_capsule_state_written_before_receiver_callback() {
+    let (capsules, address, user1, _) = setup();
+    let probe = deploy_probing_receiver();
+
+    let token_id = mint_as(capsules, address, user1, probe, ENCRYPTED_URI(), COMMITMENT(), 1000);
+
+    let erc721 = IERC721Dispatcher { contract_address: address };
+    assert(erc721.owner_of(token_id) == probe, 'probe should own token');
+    let data = capsules.get_capsule_data(token_id);
+    assert(data.content_commitment == COMMITMENT(), 'commitment mismatch');
 }

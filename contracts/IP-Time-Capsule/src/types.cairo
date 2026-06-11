@@ -6,12 +6,12 @@ pub const MAX_NAME_LEN: u32 = 64;
 pub const MAX_SYMBOL_LEN: u32 = 16;
 pub const MAX_URI_LEN: u32 = 2048;
 pub const COMMITMENT_SCHEME_POSEIDON_HASH_SALT: felt252 = 'POSEIDON_HASH_SALT';
-pub const STATUS_SEALED: u8 = 0;
-pub const STATUS_REVEALED: u8 = 1;
 
+// A capsule exists iff `creator != 0` (mint rejects a zero caller) and is
+// revealed iff `revealed_at != 0`. The salt is not stored after reveal — the
+// commitment is already verified and the salt remains in the reveal event.
 #[derive(Drop, Serde, starknet::Store)]
 pub struct TimeCapsule {
-    pub token_id: u256,
     pub creator: ContractAddress,
     pub encrypted_uri: ByteArray,
     pub content_commitment: felt252,
@@ -19,8 +19,6 @@ pub struct TimeCapsule {
     pub revealed_uri: ByteArray,
     pub revealed_at: u64,
     pub content_hash: felt252,
-    pub content_salt: felt252,
-    pub status: u8,
 }
 
 #[derive(Drop, Serde)]
@@ -34,8 +32,7 @@ pub struct TimeCapsuleData {
     pub revealed_uri: ByteArray,
     pub revealed_at: u64,
     pub content_hash: felt252,
-    pub content_salt: felt252,
-    pub status: u8,
+    pub revealed: bool,
 }
 
 pub fn compute_content_commitment(content_hash: felt252, content_salt: felt252) -> felt252 {

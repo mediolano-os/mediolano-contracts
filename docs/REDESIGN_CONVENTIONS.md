@@ -23,13 +23,14 @@ a known standard.
    directory (plus repo-level docs/CI when that is the explicit task).
 3. **Verify before claiming.** `scarb fmt && scarb build && snforge test`
    green locally; CI re-runs the same for every changed contract directory.
-4. **README carries the design.** Every contract directory must have a
-   `README.md`: what the service is, a Service Asset Declaration table (per
-   `docs/SERVICE_ASSET_DOCTRINE.md`), the interface, rules/semantics, and
-   build/test instructions. Redesigned contracts add a "Design (v2, dated)"
-   section stating what changed and why. Legacy contracts not yet redesigned
-   carry a status line saying so — a README documents what *is*, it does not
-   bless it.
+4. **README carries the design — and is written AS PART OF the redesign.**
+   Each redesign delivers a `README.md` in the contract directory: what the
+   service is, a Service Asset Declaration table (per
+   `docs/SERVICE_ASSET_DOCTRINE.md`), the interface, rules/semantics, a
+   "Design (v2, dated)" section stating what changed and why, and build/test
+   instructions. **Do not pre-write READMEs for contracts that have not been
+   audited and redesigned yet** — documentation lands with the review that
+   makes it trustworthy, one contract at a time.
 
 ## Contract checklist
 

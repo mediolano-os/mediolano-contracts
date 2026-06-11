@@ -1,24 +1,10 @@
 use starknet::ContractAddress;
 use crate::types::TimeCapsuleData;
 
-/// SRC5 interface ID for the IP Time Capsule helper ABI.
-///
-/// Computed as the XOR of selectors:
-/// - mint_capsule
-/// - reveal_capsule
-/// - get_capsule_data
-/// - get_encrypted_uri
-/// - get_revealed_uri
-/// - get_token_creator
-/// - get_token_reveal_at
-/// - is_unlocked
-/// - is_revealed
-/// - get_hidden_uri
-/// - get_max_lock_duration
-/// - compute_content_commitment
-/// - get_commitment_scheme
+/// Protocol discovery ID registered via SRC5.
+/// Derivation: starknet_keccak("mediolano.ip-time-capsule.v2").
 pub const IIP_TIME_CAPSULE_ID: felt252 =
-    0x03874654ec5283a05a5b634b5fd6ce5c4acdc942c788acaa5982991a3f7663d1;
+    0x035accb37e9eaf4dc53e1afab6bb09430fb0e4b53b2f8fc0abc76174ce7121a9;
 
 #[starknet::interface]
 pub trait ITimeCapsule<TContractState> {

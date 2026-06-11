@@ -17,8 +17,29 @@ This service follows the Medialane architecture principles: the contract is the 
 - **Commitment-first privacy.** The contract stores only `encrypted_uri` and a salted `content_commitment` before reveal. It does not store plaintext reveal metadata early.
 - **Authorized reveal.** After `reveal_at`, only the original creator or current token owner can reveal.
 - **Content-addressed URIs.** Hidden, encrypted, and revealed URIs must use `ipfs://` or `ar://`.
-- **Enumerable ERC-721.** Uses OpenZeppelin `ERC721EnumerableComponent`.
 - **SRC5 discovery.** Registers `IIP_TIME_CAPSULE_ID`.
+
+## Design (v2, 2026-06-10)
+
+The v2 redesign (see `AUDIT_REPORT.md`) keeps the v1 privacy model intact and
+tightens the implementation:
+
+- **Checks-effects-interactions fixed in `mint_capsule`.** The capsule record
+  is now written before `safe_mint` — previously the receiver callback (an
+  external call) ran first, so a reentrant receiver could observe a minted
+  token with an empty capsule (`is_unlocked == true`, zero commitment).
+  Covered by a probing-receiver test that reads the capsule from inside the
+  mint callback.
+- **ERC721Enumerable removed.** On-chain enumeration duplicated what indexers
+  rebuild from standard Transfer events, and taxed every transfer with extra
+  storage writes. The contract is the source of truth; enumeration is a cache
+  concern.
+- **Leaner records.** `TimeCapsule` drops the redundant `token_id` and
+  `status` fields (revealed ⇔ `revealed_at != 0`) and no longer stores
+  `content_salt` after reveal — the commitment is already verified on-chain
+  and the salt remains in the `TimeCapsuleRevealed` event.
+- **Reveal checks reordered** (sealed → unlocked → authorized → inputs →
+  commitment) for clearer failure semantics; behavior unchanged.
 
 ## Privacy Model
 
@@ -71,8 +92,9 @@ fn get_commitment_scheme() -> felt252
 ### SRC5 Interface
 
 ```cairo
+// starknet_keccak("mediolano.ip-time-capsule.v2")
 pub const IIP_TIME_CAPSULE_ID: felt252 =
-    0x03874654ec5283a05a5b634b5fd6ce5c4acdc942c788acaa5982991a3f7663d1;
+    0x035accb37e9eaf4dc53e1afab6bb09430fb0e4b53b2f8fc0abc76174ce7121a9;
 ```
 
 ### Commitment Scheme
@@ -98,17 +120,12 @@ pub struct TimeCapsuleData {
     revealed_uri: ByteArray,
     revealed_at: u64,
     content_hash: felt252,
-    content_salt: felt252,
-    status: u8,
+    revealed: bool,
 }
 ```
 
-Status values:
-
-| Constant | Value | Meaning |
-|---|---:|---|
-| `STATUS_SEALED` | `0` | Minted, not revealed |
-| `STATUS_REVEALED` | `1` | Revealed URI is active |
+A capsule is revealed iff `revealed_at != 0`. The salt is not stored after
+reveal; it remains available in the `TimeCapsuleRevealed` event.
 
 ## Constructor
 

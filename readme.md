@@ -68,6 +68,14 @@ The protocol should be legible to software, not only to humans. Services should 
 
 ## Repository Map
 
+Contracts marked **v2, audited** have been redesigned one-by-one against the
+[redesign conventions](docs/REDESIGN_CONVENTIONS.md) — ownerless and
+permissionless, zero-fee, checks-effects-interactions, minimal storage — with
+a findings table in each package's `AUDIT_REPORT.md` and a per-package
+`README.md`. Every pull request that touches a contract directory is built
+and tested by CI. Unmarked packages predate the conventions and are queued
+for the same treatment; treat them as prototypes until their redesign lands.
+
 Each contract package is self-contained and has its own `Scarb.toml`. Some packages are deployed and production-oriented; others are prototypes or pre-production service experiments. Treat each package README as the authority for its current status.
 
 ### Core IP Issuance
@@ -114,15 +122,15 @@ Each contract package is self-contained and has its own `Scarb.toml`. Some packa
 
 | Package | Purpose |
 | --- | --- |
-| `contracts/IP-Club` | Club manager that deploys non-transferable ERC-721 membership passes. |
-| `contracts/IP-Subscription` | Time-bound subscription plans and access records. |
-| `contracts/IP-Tickets` | Ticketing and redemption-oriented access assets. |
+| `contracts/IP-Club` | **v2, audited.** Permissionless club factory deploying non-transferable ERC-721 membership passes; member exit (leave/burn), reversible close, direct creator entry fees. |
+| `contracts/IP-Subscription` | **v2, audited.** Permissionless, ownerless time-bound subscription plans; paid time is inviolable, payments flow directly to the plan recipient. |
+| `contracts/IP-Tickets` | **v2, audited.** Permissionless ERC-721 ticket series with redemption, creator sales switch, and ERC-2981 royalty discovery. |
 | `contracts/IP-Drop` | Drop and claim flow. |
 | `contracts/IP-Airdrop` | Merkle-based airdrop flow. |
 | `contracts/IP-Launchpad` | Launchpad service primitives. |
 | `contracts/IP-Crowfunding` | Crowdfunding package. |
-| `contracts/IP-Sponsorhip` | Sponsorship package. |
-| `contracts/IP-Time-Capsule` | Time-locked IP capsule package. |
+| `contracts/IP-Sponsorhip` | **v2, audited.** Sponsorship licenses on ERC-721 IP assets: allowance-based direct settlement (no escrow), no admin, irrevocable time-bound licenses. |
+| `contracts/IP-Time-Capsule` | **v2, audited.** Time-locked IP disclosure: commitment-first privacy (encrypted pointer + Poseidon commitment), reveal after unlock. |
 | `contracts/IP-Story` | Story and narrative IP package. |
 
 ### Marketplace And Transaction Services

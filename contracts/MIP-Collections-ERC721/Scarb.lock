@@ -3,7 +3,7 @@ version = 1
 
 [[package]]
 name = "ip_collection_erc_721"
-version = "0.1.0"
+version = "0.4.0"
 dependencies = [
  "openzeppelin",
  "snforge_std",

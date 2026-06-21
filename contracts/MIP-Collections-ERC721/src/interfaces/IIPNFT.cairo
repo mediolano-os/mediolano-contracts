@@ -11,12 +11,15 @@ pub trait IIPNft<ContractState> {
     /// * `token_id` - The unique identifier for the token to be minted (must be > 0).
     /// * `token_uri` - The immutable URI/string for the token's metadata.
     /// * `creator` - The original IP creator/author recorded immutably at mint time.
+    /// * `royalty_bps` - EIP-2981 secondary-sale royalty in basis points (≤ 10_000), set once
+    ///   for this token with the creator as receiver. Immutable thereafter (no setter).
     fn mint(
         ref self: ContractState,
         recipient: ContractAddress,
         token_id: u256,
         token_uri: ByteArray,
         creator: ContractAddress,
+        royalty_bps: u128,
     );
 
     /// Archives a token, marking it as inactive while preserving the on-chain record permanently.
@@ -47,6 +50,12 @@ pub trait IIPNft<ContractState> {
     /// # Returns
     /// * `ContractAddress` - The registry address.
     fn get_registry(self: @ContractState) -> ContractAddress;
+
+    /// Returns the immutable implementation version for this deployed IPNft class.
+    ///
+    /// # Returns
+    /// * `ByteArray` - The semantic version string (e.g. "0.4.0").
+    fn version(self: @ContractState) -> ByteArray;
 
     /// Returns the base URI of the collection.
     ///

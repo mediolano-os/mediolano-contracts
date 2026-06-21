@@ -24,17 +24,22 @@ IPCollection (immutable registry)
   ├── create_collection(name, symbol, base_uri)
   │     └── deploy_syscall → IPNft (standalone ERC-721, immutable)
   │                           ├── token_creators: Map<u256, ContractAddress>
-  │                           └── token_registered_at: Map<u256, u64>
-  ├── mint(collection_id, recipient, token_uri) → token_id
-  ├── batch_mint(collection_id, recipients[], token_uris[]) → token_ids[]
+  │                           ├── token_registered_at: Map<u256, u64>
+  │                           └── EIP-2981 royalty per token (receiver = creator, immutable)
+  ├── mint(collection_id, recipient, token_uri, royalty_bps) → token_id
+  ├── batch_mint(collection_id, recipients[], token_uris[], royalty_bps[]) → token_ids[]
   ├── transfer_collection_ownership(collection_id, new_owner)
-  ├── archive(token) / batch_archive(tokens[])
-  └── transfer_token(from, to, token) / batch_transfer(from, to, tokens[])
+  ├── archive(collection_id, token_id) / batch_archive(collection_ids[], token_ids[])
+  └── transfer_token(to, collection_id, token_id) / batch_transfer(from, to, collection_ids[], token_ids[])
 ```
 
 ## Token Identifier Format
 
-Tokens are identified by a `ByteArray` string in the format `"collection_id:token_id"`, e.g. `"3:17"`. This is parsed by `TokenTrait::from_bytes` which validates that exactly one `:` separator is present and both segments are valid decimal numbers.
+Tokens are addressed by two explicit `u256` arguments — `collection_id` and `token_id` — on every
+token operation (`archive`, `transfer_token`, `get_token`, `is_valid_token`,
+`is_transferable_token`) and as parallel `collection_ids` / `token_ids` arrays on the batch calls.
+There is no stringified `"collection_id:token_id"` form (the prior `ByteArray` parser was removed in
+v0.4.0): integrators pass the two numbers directly — cheaper, and no parsing/validation surface.
 
 ## Storage
 
@@ -62,10 +67,10 @@ struct Collection {
 struct CollectionStats {
     total_minted: u256,
     total_archived: u256,
-    total_transfers: u256,       // transfers routed through IPCollection only
+    protocol_routed_transfers: u256,  // transfers routed through IPCollection only
     last_mint_time: u64,
     last_archive_time: u64,
-    last_transfer_time: u64,     // last IPCollection-routed transfer
+    last_transfer_time: u64,          // last IPCollection-routed transfer
 }
 
 struct TokenData {
@@ -90,29 +95,34 @@ fn get_collection_stats(collection_id) -> CollectionStats
 fn is_valid_collection(collection_id) -> bool
 fn is_collection_owner(collection_id, owner) -> bool
 fn list_user_collections(user) -> Span<u256>
+fn version() -> ByteArray            // immutable implementation version, e.g. "0.4.0"
 ```
 
 ### Token operations
 ```cairo
-fn mint(collection_id, recipient, token_uri) -> u256
-fn batch_mint(collection_id, recipients[], token_uris[]) -> Span<u256>
-fn archive(token: ByteArray)              // replaces burn — record preserved
-fn batch_archive(tokens: Array<ByteArray>)
-fn transfer_token(from, to, token)
-fn batch_transfer(from, to, tokens[])
-fn get_token(token: ByteArray) -> TokenData
-fn is_valid_token(token: ByteArray) -> bool
-fn is_transferable_token(token: ByteArray) -> bool
+fn mint(collection_id, recipient, token_uri, royalty_bps: u128) -> u256
+fn batch_mint(collection_id, recipients[], token_uris[], royalty_bps: Array<u128>) -> Span<u256>
+fn archive(collection_id, token_id)              // replaces burn — record preserved
+fn batch_archive(collection_ids[], token_ids[])
+fn transfer_token(to, collection_id, token_id)
+fn batch_transfer(from, to, collection_ids[], token_ids[])
+fn get_token(collection_id, token_id) -> TokenData
+fn is_valid_token(collection_id, token_id) -> bool
+fn is_transferable_token(collection_id, token_id) -> bool
 fn list_user_tokens_per_collection(collection_id, user) -> Span<u256>
 ```
 
-There are no admin or upgrade entrypoints.
+`royalty_bps` (≤ 10_000) sets the token's immutable EIP-2981 royalty with the creator as receiver.
+The deployed `IPNft` exposes the standard read surface — `royalty_info`, `token_royalty`,
+`default_royalty`, `supports_interface(IERC2981_ID)`, and `version()`.
+
+There are no admin or upgrade entrypoints, and no royalty setter — royalty is fixed at mint.
 
 ## Minting And Provenance
 
 Only the collection owner can mint. The `recipient` receives the ERC-721 token, while the caller is recorded as the immutable `original_creator` / author for the token. This keeps custody and authorship separate: tokens can be minted directly to another wallet without rewriting the legal provenance record.
 
-Each mint writes the token URI, original creator, and registration timestamp exactly once. Later transfers, protocol-routed transfers, and collection ownership transfers do not modify those fields.
+Each mint writes the token URI, original creator, registration timestamp, and EIP-2981 royalty exactly once. The royalty receiver is the immutable `original_creator` (never the mutable collection owner), so secondary-sale royalties can never be redirected by an ownership transfer. Later transfers, protocol-routed transfers, and collection ownership transfers do not modify any of those fields.
 
 ## Events
 
@@ -120,12 +130,12 @@ Each mint writes the token URI, original creator, and registration timestamp exa
 |---|---|
 | `CollectionCreated` | collection_id, owner, name, symbol, base_uri |
 | `CollectionOwnershipTransferred` | collection_id, previous_owner, new_owner, timestamp |
-| `TokenMinted` | collection_id, token_id, owner, metadata_uri |
-| `TokenMintedBatch` | collection_id, token_ids, owners, operator, timestamp |
+| `TokenMinted` | collection_id, token_id, owner, metadata_uri, royalty_bps |
+| `TokenMintedBatch` | collection_id, token_ids, owners, metadata_uris, operator, timestamp |
 | `TokenArchived` | collection_id, token_id, operator, timestamp |
-| `TokenArchivedBatch` | tokens, operator, timestamp |
+| `TokenArchivedBatch` | collection_ids, token_ids, operator, timestamp |
 | `TokenTransferred` | collection_id, token_id, from, to, operator, timestamp |
-| `TokenTransferredBatch` | from, to, tokens, operator, timestamp |
+| `TokenTransferredBatch` | from, to, collection_ids, token_ids, operator, timestamp |
 
 ## Archive vs Burn
 
@@ -141,7 +151,7 @@ Active tokens support standard ERC-721 direct transfers on `IPNft`, preserving m
 
 The `IPCollection.transfer_token` and `batch_transfer` methods are optional protocol-aware transfer paths. They update collection transfer stats and emit protocol transfer events. Before using them, the token owner must approve `IPCollection` either with per-token approval or `set_approval_for_all`. The caller must be the token owner, token-approved address, or an approved operator.
 
-Indexers that need complete transfer history should subscribe to both native `IPNft` ERC-721 `Transfer` events and `IPCollection` protocol transfer events. `CollectionStats.total_transfers` counts only transfers routed through `IPCollection`.
+Indexers that need complete transfer history should subscribe to both native `IPNft` ERC-721 `Transfer` events and `IPCollection` protocol transfer events. `CollectionStats.protocol_routed_transfers` counts only transfers routed through `IPCollection`.
 
 ## Metadata URI Semantics
 
@@ -151,24 +161,29 @@ Frontends, SDKs, and indexers should validate and classify known URI formats off
 
 ## Deployments
 
-### Starknet Mainnet
+Chain is a first-class dimension of the protocol; today's deployment lives on **Starknet**.
+
+### Starknet — v0.4.0
 
 | Component | Class hash | Address |
 |---|---|---|
-| `IPNft` immutable ERC-721 class | `0x02d50b7e6d1a14f17a8fdc2df24d6e493bae6fae579656d81959b8c92de4b13f` | Collection instances are deployed by `IPCollection` |
-| `IPCollection` immutable registry/factory class | `0x00203f0e03a472cb6e058327ca22147c75e574cc2876f4981e99bcbcbe716a29` | `0x07c2207d200a1dce1cc82a117d8ba91dabfe3d1cc5072d9e4cdd9654fbb0ff10` |
+| `IPNft` immutable ERC-721 class | `0x040551f0d009a6d665ddff980a375dfccc71a8928c8bfcc9ab56244bc4464fab` | Collection instances are deployed by `IPCollection` |
+| `IPCollection` immutable registry/factory class | `0x063d4ac4ae317fd155216bf1b8a4d3a63172ff72965b9ac48dd5add0c2d32b70` | `0x0558c9b6ea4d403df6d765fb77be55702c572f0a811f037c6c4209fe1e5aeef2` |
 
-| Action | Transaction | Actual fee |
-|---|---|---|
-| Declare `IPNft` | `0x0602f832d8bf6590780bb592c18e98aae9a0df9ad86245f94a92e1467ddbe2b8` | `24.308705 STRK` |
-| Declare `IPCollection` | `0x04c89525842cf5e9f95e23942017bbd7caac40ab1f193a4603a52799ddf59194` | `29.224179 STRK` |
-| Deploy `IPCollection` | `0x0543d8fe9e00c8981f6dd7d4148ad94cba8b9e6dfed69f1d4583c6034f71435f` | `0.036002 STRK` |
+| Action | Transaction |
+|---|---|
+| Declare `IPNft` | `0x0312d3292713a7d7208de7d0200c5ec456930d0d53a6e6bc97fb1d47c3dba4ba` |
+| Declare `IPCollection` | `0x0569ed2167b826e38c27eb2d5b7cd7a823477a1d14a2ec1c7e21bfe7698c200f` |
+| Deploy `IPCollection` | `0x0383633d4ee0140ac1acebc2a28a90aeeb4734f4cedc5b3ff0291411ec74be78` |
+
+v0.4.0 adds per-token EIP-2981 royalties (receiver = creator, immutable), `version()` views,
+`(collection_id, token_id)` token arguments, and the `protocol_routed_transfers` stat.
 
 Deployment verification:
 
-- The deployed registry class hash is `0x00203f0e03a472cb6e058327ca22147c75e574cc2876f4981e99bcbcbe716a29`.
-- The registry constructor received `0x02d50b7e6d1a14f17a8fdc2df24d6e493bae6fae579656d81959b8c92de4b13f` as its immutable `IPNft` class hash.
-- `get_collection_count()` returns `0` immediately after deployment.
+- The deployed registry class hash is `0x063d4ac4ae317fd155216bf1b8a4d3a63172ff72965b9ac48dd5add0c2d32b70`.
+- The registry constructor received `0x040551f0d009a6d665ddff980a375dfccc71a8928c8bfcc9ab56244bc4464fab` as its immutable `IPNft` class hash.
+- `get_collection_count()` returns `0` and `version()` returns `"0.4.0"` immediately after deployment.
 
 Mainnet declaration/deployment flow:
 

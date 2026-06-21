@@ -20,8 +20,7 @@ pub mod IPCollection {
     use crate::interfaces::IIPCollection::IIPCollection;
     use crate::interfaces::IIPNFT::{IIPNftDispatcher, IIPNftDispatcherTrait};
     use crate::types::{
-        Collection, CollectionStats, TokenData, TokenTrait, MAX_BASE_URI_LEN, MAX_NAME_LEN,
-        MAX_SYMBOL_LEN,
+        Collection, CollectionStats, MAX_BASE_URI_LEN, MAX_NAME_LEN, MAX_SYMBOL_LEN, TokenData,
     };
 
     // IPCollection is intentionally immutable. It deploys immutable IPNft
@@ -78,6 +77,7 @@ pub mod IPCollection {
         pub token_id: u256,
         pub owner: ContractAddress,
         pub metadata_uri: ByteArray,
+        pub royalty_bps: u128,
     }
 
     #[derive(Drop, starknet::Event)]
@@ -86,6 +86,9 @@ pub mod IPCollection {
         pub collection_id: u256,
         pub token_ids: Span<u256>,
         pub owners: Array<ContractAddress>,
+        // D-2: per-token URIs included so event-only/indexer-independent readers can
+        // reconstruct batch-minted metadata without per-token `token_uri` reads.
+        pub metadata_uris: Array<ByteArray>,
         pub operator: ContractAddress,
         pub timestamp: u64,
     }
@@ -102,7 +105,8 @@ pub mod IPCollection {
 
     #[derive(Drop, starknet::Event)]
     pub struct TokenArchivedBatch {
-        pub tokens: Array<ByteArray>,
+        pub collection_ids: Span<u256>,
+        pub token_ids: Span<u256>,
         pub operator: ContractAddress,
         pub timestamp: u64,
     }
@@ -123,7 +127,8 @@ pub mod IPCollection {
     pub struct TokenTransferredBatch {
         pub from: ContractAddress,
         pub to: ContractAddress,
-        pub tokens: Array<ByteArray>,
+        pub collection_ids: Span<u256>,
+        pub token_ids: Span<u256>,
         pub operator: ContractAddress,
         pub timestamp: u64,
     }
@@ -185,13 +190,15 @@ pub mod IPCollection {
         }
 
         /// Mints a new token in the specified collection to the recipient address.
-        /// Only the collection owner can mint.
-        /// Token IDs start at 1 (R-05).
+        /// Only the collection owner can mint. Token IDs start at 1 (R-05).
+        /// `royalty_bps` sets the token's immutable EIP-2981 secondary-sale royalty
+        /// (receiver = the minting collection owner, recorded as the token creator).
         fn mint(
             ref self: ContractState,
             collection_id: u256,
             recipient: ContractAddress,
             token_uri: ByteArray,
+            royalty_bps: u128,
         ) -> u256 {
             assert(!recipient.is_zero(), 'Recipient is zero address');
 
@@ -205,14 +212,16 @@ pub mod IPCollection {
             // R-05: token IDs start at 1 — total_minted + 1 gives the next ID
             let next_token_id = collection_stats.total_minted + 1;
 
-            let ip_nft = IIPNftDispatcher { contract_address: collection.ip_nft };
-            ip_nft.mint(recipient, next_token_id, token_uri.clone(), operator);
-
+            // D-1 (CEI): advance + persist stats BEFORE the external mint call. A revert in
+            // ip_nft.mint rolls this back; doing it first removes any reentrancy ID-collision
+            // surface regardless of future mint internals.
             collection_stats.total_minted = next_token_id;
             collection_stats.last_mint_time = get_block_timestamp();
             self.collection_stats.entry(collection_id).write(collection_stats);
 
-            // R-01: use local token_uri directly — no extra cross-contract call needed
+            let ip_nft = IIPNftDispatcher { contract_address: collection.ip_nft };
+            ip_nft.mint(recipient, next_token_id, token_uri.clone(), operator, royalty_bps);
+
             self
                 .emit(
                     TokenMinted {
@@ -220,6 +229,7 @@ pub mod IPCollection {
                         token_id: next_token_id,
                         owner: recipient,
                         metadata_uri: token_uri,
+                        royalty_bps,
                     },
                 );
 
@@ -227,18 +237,21 @@ pub mod IPCollection {
         }
 
         /// Batch mints tokens in the specified collection to multiple recipients.
-        /// Only the collection owner can batch mint.
+        /// Only the collection owner can batch mint. `recipients`, `token_uris`, and
+        /// `royalty_bps` must all be the same length (per-token royalty).
         fn batch_mint(
             ref self: ContractState,
             collection_id: u256,
             recipients: Array<ContractAddress>,
             token_uris: Array<ByteArray>,
+            royalty_bps: Array<u128>,
         ) -> Span<u256> {
             let n = recipients.len();
             assert(n > 0, 'Recipients array is empty');
 
-            // M-01: arrays must be the same length
+            // M-01: all input arrays must be the same length
             assert(token_uris.len() == n, 'Array lengths mismatch');
+            assert(royalty_bps.len() == n, 'Array lengths mismatch');
 
             let collection = self.collections.read(collection_id);
             assert(!collection.ip_nft.is_zero(), 'Invalid collection');
@@ -247,6 +260,14 @@ pub mod IPCollection {
             assert(operator == collection.owner, 'Only collection owner can mint');
 
             let mut collection_stats = self.collection_stats.read(collection_id);
+            let base = collection_stats.total_minted;
+            let timestamp = get_block_timestamp();
+
+            // D-1 (CEI): advance + persist stats BEFORE any external mint call.
+            collection_stats.total_minted = base + n.into();
+            collection_stats.last_mint_time = timestamp;
+            self.collection_stats.entry(collection_id).write(collection_stats);
+
             let ip_nft = IIPNftDispatcher { contract_address: collection.ip_nft };
 
             let mut i: u32 = 0;
@@ -258,23 +279,19 @@ pub mod IPCollection {
                 assert(!recipient.is_zero(), 'Recipient is zero address');
 
                 // R-05: token IDs start at 1
-                let next_token_id = collection_stats.total_minted + i.into() + 1;
-                ip_nft.mint(recipient, next_token_id, token_uri, operator);
+                let next_token_id = base + i.into() + 1;
+                ip_nft.mint(recipient, next_token_id, token_uri, operator, *royalty_bps.at(i));
                 token_ids.append(next_token_id);
                 i += 1;
-            };
-
-            let timestamp = get_block_timestamp();
-            collection_stats.total_minted += n.into();
-            collection_stats.last_mint_time = timestamp;
-            self.collection_stats.entry(collection_id).write(collection_stats);
+            }
 
             self
                 .emit(
                     TokenMintedBatch {
                         collection_id,
                         token_ids: token_ids.span(),
-                        owners: recipients.clone(),
+                        owners: recipients,
+                        metadata_uris: token_uris,
                         operator,
                         timestamp,
                     },
@@ -303,7 +320,10 @@ pub mod IPCollection {
             let last_index = old_count - 1;
 
             if old_index != last_index {
-                let moved_collection_id = self.user_collections.entry((old_owner, last_index)).read();
+                let moved_collection_id = self
+                    .user_collections
+                    .entry((old_owner, last_index))
+                    .read();
                 self.user_collections.entry((old_owner, old_index)).write(moved_collection_id);
                 self.collection_owner_index.entry(moved_collection_id).write(old_index);
             }
@@ -333,111 +353,109 @@ pub mod IPCollection {
         /// Archives a token, permanently preserving the on-chain provenance record.
         /// Only the token owner can archive their token.
         /// Replaces destructive burn — the IP registration record is never destroyed.
-        fn archive(ref self: ContractState, token: ByteArray) {
-            let token = TokenTrait::from_bytes(token);
-            let collection = self.collections.read(token.collection_id);
+        fn archive(ref self: ContractState, collection_id: u256, token_id: u256) {
+            let collection = self.collections.read(collection_id);
             assert(!collection.ip_nft.is_zero(), 'Invalid collection');
 
             let caller = get_caller_address();
             let token_owner = IERC721Dispatcher { contract_address: collection.ip_nft }
-                .owner_of(token.token_id);
+                .owner_of(token_id);
             assert(token_owner == caller, 'Caller not token owner');
 
-            IIPNftDispatcher { contract_address: collection.ip_nft }.archive(token.token_id);
+            IIPNftDispatcher { contract_address: collection.ip_nft }.archive(token_id);
 
             let timestamp = get_block_timestamp();
-            let mut collection_stats = self.collection_stats.read(token.collection_id);
+            let mut collection_stats = self.collection_stats.read(collection_id);
             collection_stats.total_archived += 1;
             collection_stats.last_archive_time = timestamp;
-            self.collection_stats.entry(token.collection_id).write(collection_stats);
+            self.collection_stats.entry(collection_id).write(collection_stats);
 
-            self
-                .emit(
-                    TokenArchived {
-                        collection_id: token.collection_id,
-                        token_id: token.token_id,
-                        operator: caller,
-                        timestamp,
-                    },
-                );
+            self.emit(TokenArchived { collection_id, token_id, operator: caller, timestamp });
         }
 
-        /// Batch archives multiple tokens.
-        /// C-01 FIX: ownership verified for every token inside the loop.
+        /// Batch archives multiple tokens (parallel `collection_ids` / `token_ids`).
+        /// C-01: ownership verified for every token inside the loop.
         /// Stats are written once per unique collection, not once per token.
-        fn batch_archive(ref self: ContractState, tokens: Array<ByteArray>) {
-            let n = tokens.len();
+        fn batch_archive(
+            ref self: ContractState, collection_ids: Array<u256>, token_ids: Array<u256>,
+        ) {
+            let n = collection_ids.len();
             assert(n > 0, 'Tokens array is empty');
+            assert(token_ids.len() == n, 'Array lengths mismatch');
 
             let caller = get_caller_address();
             let timestamp = get_block_timestamp();
 
             // Accumulate archive counts per collection_id to minimise storage writes.
-            // Key: collection_id.low (felt252); Value: count of archived tokens.
-            // collection_ids are sequential u256 with high=0, so .low is unique.
+            // Key: collection_id.low (felt252); collection_ids are sequential u256 with high=0.
             let mut unique_cols: Array<u256> = array![];
             let mut col_counts: Felt252Dict<u128> = Default::default();
 
             let mut i: u32 = 0;
             while i < n {
-                let token = TokenTrait::from_bytes(tokens.at(i).clone());
-                assert(token.collection_id.high == 0, 'Collection ID too large');
-                let collection = self.collections.read(token.collection_id);
+                let collection_id = *collection_ids.at(i);
+                let token_id = *token_ids.at(i);
+                assert(collection_id.high == 0, 'Collection ID too large');
+                let collection = self.collections.read(collection_id);
                 assert(!collection.ip_nft.is_zero(), 'Invalid collection');
 
-                // C-01 FIX: verify ownership for every token
+                // C-01: verify ownership for every token
                 let token_owner = IERC721Dispatcher { contract_address: collection.ip_nft }
-                    .owner_of(token.token_id);
+                    .owner_of(token_id);
                 assert(token_owner == caller, 'Caller not token owner');
 
-                IIPNftDispatcher { contract_address: collection.ip_nft }.archive(token.token_id);
+                IIPNftDispatcher { contract_address: collection.ip_nft }.archive(token_id);
 
-                let key: felt252 = token.collection_id.low.into();
+                let key: felt252 = collection_id.low.into();
                 let prev = col_counts.get(key);
                 if prev == 0 {
-                    unique_cols.append(token.collection_id);
+                    unique_cols.append(collection_id);
                 }
                 col_counts.insert(key, prev + 1);
 
                 i += 1;
-            };
+            }
 
             // One storage read+write per unique collection rather than per token
             let mut j: u32 = 0;
             while j < unique_cols.len() {
                 let col_id = *unique_cols.at(j);
-                assert(col_id.high == 0, 'Collection ID too large');
                 let count: u256 = col_counts.get(col_id.low.into()).into();
                 let mut stats = self.collection_stats.read(col_id);
                 stats.total_archived += count;
                 stats.last_archive_time = timestamp;
                 self.collection_stats.entry(col_id).write(stats);
                 j += 1;
-            };
+            }
 
             self
                 .emit(
-                    TokenArchivedBatch { tokens: tokens.clone(), operator: caller, timestamp },
+                    TokenArchivedBatch {
+                        collection_ids: collection_ids.span(),
+                        token_ids: token_ids.span(),
+                        operator: caller,
+                        timestamp,
+                    },
                 );
         }
 
-        /// Transfers a token from one address to another.
+        /// Transfers a token from its current owner to `to`.
         /// The IPCollection contract must be approved for the token.
-        /// M-02 FIX: caller must be the token owner or an approved operator.
+        /// O-3: `from` is derived from on-chain ownership (was a redundant argument).
+        /// M-02: caller must be the token owner or an approved operator.
         fn transfer_token(
-            ref self: ContractState, from: ContractAddress, to: ContractAddress, token: ByteArray,
+            ref self: ContractState, to: ContractAddress, collection_id: u256, token_id: u256,
         ) {
-            let token = TokenTrait::from_bytes(token);
-            let collection = self.collections.read(token.collection_id);
+            let collection = self.collections.read(collection_id);
             assert(!collection.ip_nft.is_zero(), 'Invalid collection');
 
             let caller = get_caller_address();
             let ip_nft = IERC721Dispatcher { contract_address: collection.ip_nft };
 
-            // M-02 FIX: caller must be owner or approved operator
-            let token_owner = ip_nft.owner_of(token.token_id);
-            let approved = ip_nft.get_approved(token.token_id);
+            let token_owner = ip_nft.owner_of(token_id);
+            let approved = ip_nft.get_approved(token_id);
             let registry = get_contract_address();
+            // M-02: registry must be approved, and caller must be owner or approved operator
             assert(
                 approved == registry || ip_nft.is_approved_for_all(token_owner, registry),
                 'Contract not approved',
@@ -449,42 +467,41 @@ pub mod IPCollection {
                 'Not authorized',
             );
 
-            ip_nft.transfer_from(from, to, token.token_id);
+            ip_nft.transfer_from(token_owner, to, token_id);
 
-            // R-03 FIX: update transfer stats (was never updated before)
+            // R-03: update protocol-routed transfer stats
             let timestamp = get_block_timestamp();
-            let mut collection_stats = self.collection_stats.read(token.collection_id);
-            collection_stats.total_transfers += 1;
+            let mut collection_stats = self.collection_stats.read(collection_id);
+            collection_stats.protocol_routed_transfers += 1;
             collection_stats.last_transfer_time = timestamp;
-            self.collection_stats.entry(token.collection_id).write(collection_stats);
+            self.collection_stats.entry(collection_id).write(collection_stats);
 
             self
                 .emit(
                     TokenTransferred {
-                        collection_id: token.collection_id,
-                        token_id: token.token_id,
-                        from,
-                        to,
-                        operator: caller,
-                        timestamp,
+                        collection_id, token_id, from: token_owner, to, operator: caller, timestamp,
                     },
                 );
         }
 
-        /// Batch transfers multiple tokens from one address to another.
-        /// H-01 FIX: approval check and caller authorization added inside the loop.
+        /// Batch transfers multiple tokens (parallel `collection_ids` / `token_ids`) from `from`.
+        /// H-01: approval check and caller authorization enforced for every token.
         /// Stats are written once per unique collection, not once per token.
         fn batch_transfer(
             ref self: ContractState,
             from: ContractAddress,
             to: ContractAddress,
-            tokens: Array<ByteArray>,
+            collection_ids: Array<u256>,
+            token_ids: Array<u256>,
         ) {
-            let n = tokens.len();
+            let n = collection_ids.len();
             assert(n > 0, 'Tokens array is empty');
+            assert(token_ids.len() == n, 'Array lengths mismatch');
 
             let caller = get_caller_address();
             let timestamp = get_block_timestamp();
+            // O-2: registry is invariant — read once, not per iteration.
+            let registry = get_contract_address();
 
             // Accumulate transfer counts per collection_id to minimise storage writes
             let mut unique_cols: Array<u256> = array![];
@@ -492,24 +509,23 @@ pub mod IPCollection {
 
             let mut i: u32 = 0;
             while i < n {
-                let token = TokenTrait::from_bytes(tokens.at(i).clone());
-                assert(token.collection_id.high == 0, 'Collection ID too large');
-                let collection = self.collections.read(token.collection_id);
+                let collection_id = *collection_ids.at(i);
+                let token_id = *token_ids.at(i);
+                assert(collection_id.high == 0, 'Collection ID too large');
+                let collection = self.collections.read(collection_id);
                 assert(!collection.ip_nft.is_zero(), 'Invalid collection');
 
                 let ip_nft = IERC721Dispatcher { contract_address: collection.ip_nft };
 
-                let token_owner = ip_nft.owner_of(token.token_id);
-                let approved = ip_nft.get_approved(token.token_id);
-                let registry = get_contract_address();
+                let token_owner = ip_nft.owner_of(token_id);
+                let approved = ip_nft.get_approved(token_id);
 
-                // H-01 FIX: require contract approval (was missing in batch path)
+                // H-01: require contract approval
                 assert(
                     approved == registry || ip_nft.is_approved_for_all(token_owner, registry),
                     'Contract not approved',
                 );
-
-                // H-01 FIX: require caller is authorized (was missing entirely)
+                // H-01: require caller is authorized
                 assert(
                     caller == token_owner
                         || approved == caller
@@ -517,35 +533,39 @@ pub mod IPCollection {
                     'Not authorized',
                 );
 
-                ip_nft.transfer_from(from, to, token.token_id);
+                ip_nft.transfer_from(from, to, token_id);
 
-                let key: felt252 = token.collection_id.low.into();
+                let key: felt252 = collection_id.low.into();
                 let prev = col_counts.get(key);
                 if prev == 0 {
-                    unique_cols.append(token.collection_id);
+                    unique_cols.append(collection_id);
                 }
                 col_counts.insert(key, prev + 1);
 
                 i += 1;
-            };
+            }
 
             // One storage read+write per unique collection rather than per token
             let mut j: u32 = 0;
             while j < unique_cols.len() {
                 let col_id = *unique_cols.at(j);
-                assert(col_id.high == 0, 'Collection ID too large');
                 let count: u256 = col_counts.get(col_id.low.into()).into();
                 let mut stats = self.collection_stats.read(col_id);
-                stats.total_transfers += count;
+                stats.protocol_routed_transfers += count;
                 stats.last_transfer_time = timestamp;
                 self.collection_stats.entry(col_id).write(stats);
                 j += 1;
-            };
+            }
 
             self
                 .emit(
                     TokenTransferredBatch {
-                        from, to, tokens: tokens.clone(), operator: caller, timestamp,
+                        from,
+                        to,
+                        collection_ids: collection_ids.span(),
+                        token_ids: token_ids.span(),
+                        operator: caller,
+                        timestamp,
                     },
                 );
         }
@@ -571,7 +591,7 @@ pub mod IPCollection {
                 let collection_id = self.user_collections.entry((user, i)).read();
                 collections.append(collection_id);
                 i += 1;
-            };
+            }
             collections.span()
         }
 
@@ -583,6 +603,11 @@ pub mod IPCollection {
         /// Returns the total number of collections ever created.
         fn get_collection_count(self: @ContractState) -> u256 {
             self.collection_count.read()
+        }
+
+        /// Returns the immutable implementation version for this deployed registry class.
+        fn version(self: @ContractState) -> ByteArray {
+            "0.4.0"
         }
 
         /// Retrieves statistics for a specific collection.
@@ -598,49 +623,39 @@ pub mod IPCollection {
 
         /// Retrieves full token data including the immutable legal record fields.
         /// Reverts if the collection is invalid or the token does not exist.
-        /// Uses a single cross-contract call (get_full_token_data) instead of four.
-        fn get_token(self: @ContractState, token: ByteArray) -> TokenData {
-            let token = TokenTrait::from_bytes(token);
-            let collection = self.collections.read(token.collection_id);
+        fn get_token(self: @ContractState, collection_id: u256, token_id: u256) -> TokenData {
+            let collection = self.collections.read(collection_id);
             assert(!collection.ip_nft.is_zero(), 'Invalid collection');
 
-            // Single cross-contract call returns all four fields at once
             let nft = IIPNftDispatcher { contract_address: collection.ip_nft };
             let (owner, metadata_uri, original_creator, registered_at) = nft
-                .get_full_token_data(token.token_id);
+                .get_full_token_data(token_id);
 
             TokenData {
-                collection_id: token.collection_id,
-                token_id: token.token_id,
-                owner,
-                metadata_uri,
-                original_creator,
-                registered_at,
+                collection_id, token_id, owner, metadata_uri, original_creator, registered_at,
             }
         }
 
         /// Checks if a token is valid (exists in a valid collection).
         /// Safe: uses token_exists which never panics, unlike owner_of.
-        fn is_valid_token(self: @ContractState, token: ByteArray) -> bool {
-            let token = TokenTrait::from_bytes(token);
-            let collection = self.collections.read(token.collection_id);
+        fn is_valid_token(self: @ContractState, collection_id: u256, token_id: u256) -> bool {
+            let collection = self.collections.read(collection_id);
             if collection.ip_nft.is_zero() {
                 return false;
             }
-            // token_exists reads the owner slot directly and returns false for non-existent
-            // tokens — owner_of would panic, making is_valid_token unusable as a guard
-            IIPNftDispatcher { contract_address: collection.ip_nft }.token_exists(token.token_id)
+            IIPNftDispatcher { contract_address: collection.ip_nft }.token_exists(token_id)
         }
 
         /// Checks if a token exists and has not been archived.
-        fn is_transferable_token(self: @ContractState, token: ByteArray) -> bool {
-            let token = TokenTrait::from_bytes(token);
-            let collection = self.collections.read(token.collection_id);
+        fn is_transferable_token(
+            self: @ContractState, collection_id: u256, token_id: u256,
+        ) -> bool {
+            let collection = self.collections.read(collection_id);
             if collection.ip_nft.is_zero() {
                 return false;
             }
             let nft = IIPNftDispatcher { contract_address: collection.ip_nft };
-            nft.token_exists(token.token_id) && !nft.is_archived(token.token_id)
+            nft.token_exists(token_id) && !nft.is_archived(token_id)
         }
 
         /// Checks if a given address is the owner of a specific collection.

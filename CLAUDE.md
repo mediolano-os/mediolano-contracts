@@ -83,10 +83,11 @@ Different contracts use different OpenZeppelin and `snforge_std` versions. Check
 
 `snfoundry.toml` in each contract configures `sncast` profiles. Deploy flow: `scarb build` → `sncast --profile <profile> --wait declare` → `sncast --profile <profile> --wait deploy`.
 
-Current `MIP-Collections-ERC721` Starknet mainnet deployment:
-- `IPNft` class hash: `0x02d50b7e6d1a14f17a8fdc2df24d6e493bae6fae579656d81959b8c92de4b13f`
-- `IPCollection` class hash: `0x00203f0e03a472cb6e058327ca22147c75e574cc2876f4981e99bcbcbe716a29`
-- `IPCollection` registry address: `0x07c2207d200a1dce1cc82a117d8ba91dabfe3d1cc5072d9e4cdd9654fbb0ff10`
+Current `MIP-Collections-ERC721` deployment — **chain: Starknet** (v0.4.0, on-chain `version()` == "0.4.0"):
+- `IPNft` class hash: `0x040551f0d009a6d665ddff980a375dfccc71a8928c8bfcc9ab56244bc4464fab`
+- `IPCollection` class hash: `0x063d4ac4ae317fd155216bf1b8a4d3a63172ff72965b9ac48dd5add0c2d32b70`
+- `IPCollection` registry address: `0x0558c9b6ea4d403df6d765fb77be55702c572f0a811f037c6c4209fe1e5aeef2`
+- Adds per-token EIP-2981 royalties (receiver = creator, immutable), `version()` views, `(collection_id, token_id)` token args, `protocol_routed_transfers` stat. Prior immutable deploys remain valid on-chain but are not tracked here.
 
 ## Cairo Coding Conventions
 

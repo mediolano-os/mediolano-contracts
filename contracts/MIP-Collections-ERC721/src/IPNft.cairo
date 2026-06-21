@@ -1,6 +1,8 @@
 #[starknet::contract]
 pub mod IPNft {
+    use core::num::traits::Zero;
     use openzeppelin::introspection::src5::SRC5Component;
+    use openzeppelin::token::common::erc2981::{DefaultConfig, ERC2981Component};
     use openzeppelin::token::erc721::ERC721Component;
     use openzeppelin::token::erc721::extensions::ERC721EnumerableComponent;
     use openzeppelin::token::erc721::interface::{IERC721Metadata, IERC721MetadataCamelOnly};
@@ -8,16 +10,18 @@ pub mod IPNft {
         Map, StorageMapReadAccess, StorageMapWriteAccess, StoragePointerReadAccess,
         StoragePointerWriteAccess,
     };
-    use core::num::traits::Zero;
     use starknet::{ContractAddress, get_block_timestamp, get_caller_address};
     use crate::interfaces::IIPNFT::IIPNft;
-    use crate::types::{MAX_BASE_URI_LEN, MAX_NAME_LEN, MAX_SYMBOL_LEN, MAX_TOKEN_URI_LEN};
+    use crate::types::{
+        MAX_BASE_URI_LEN, MAX_NAME_LEN, MAX_ROYALTY_BPS, MAX_SYMBOL_LEN, MAX_TOKEN_URI_LEN,
+    };
 
     component!(path: ERC721Component, storage: erc721, event: ERC721Event);
     component!(path: SRC5Component, storage: src5, event: SRC5Event);
     component!(
         path: ERC721EnumerableComponent, storage: erc721_enumerable, event: ERC721EnumerableEvent,
     );
+    component!(path: ERC2981Component, storage: erc2981, event: ERC2981Event);
 
     // COMP-01: UpgradeableComponent intentionally removed.
     // IPNft contracts are permanently immutable by design — the per-token URI, creator,
@@ -36,10 +40,18 @@ pub mod IPNft {
         ERC721EnumerableComponent::ERC721EnumerableImpl<ContractState>;
     #[abi(embed_v0)]
     impl SRC5Impl = SRC5Component::SRC5Impl<ContractState>;
+    // EIP-2981 read surface only: royalty_info + default/token royalty views.
+    // ERC2981AdminOwnableImpl is intentionally NOT embedded — royalty is immutable,
+    // set once per token at mint, with no owner and no post-mint setter.
+    #[abi(embed_v0)]
+    impl ERC2981Impl = ERC2981Component::ERC2981Impl<ContractState>;
+    #[abi(embed_v0)]
+    impl ERC2981InfoImpl = ERC2981Component::ERC2981InfoImpl<ContractState>;
 
     impl ERC721InternalImpl = ERC721Component::InternalImpl<ContractState>;
     impl ERC721EnumerableInternalImpl = ERC721EnumerableComponent::InternalImpl<ContractState>;
     impl SRC5ComponentInternalImpl = SRC5Component::InternalImpl<ContractState>;
+    impl ERC2981InternalImpl = ERC2981Component::InternalImpl<ContractState>;
 
     #[storage]
     struct Storage {
@@ -59,6 +71,8 @@ pub mod IPNft {
         src5: SRC5Component::Storage,
         #[substorage(v0)]
         erc721_enumerable: ERC721EnumerableComponent::Storage,
+        #[substorage(v0)]
+        erc2981: ERC2981Component::Storage,
     }
 
     #[event]
@@ -70,6 +84,8 @@ pub mod IPNft {
         SRC5Event: SRC5Component::Event,
         #[flat]
         ERC721EnumerableEvent: ERC721EnumerableComponent::Event,
+        #[flat]
+        ERC2981Event: ERC2981Component::Event,
     }
 
     /// Constructor.
@@ -92,6 +108,11 @@ pub mod IPNft {
 
         self.erc721.initializer(name, symbol, base_uri);
         self.erc721_enumerable.initializer();
+        // EIP-2981: register IERC2981_ID in SRC5. The default royalty is inert
+        // (`registry`, 0%) — it is never used because every token's royalty is set
+        // explicitly at mint via `_set_token_royalty`. A non-zero receiver is required
+        // by the component initializer.
+        self.erc2981.initializer(registry, 0);
         self.collection_id.write(collection_id);
         self.registry.write(registry);
     }
@@ -154,16 +175,23 @@ pub mod IPNft {
             token_id: u256,
             token_uri: ByteArray,
             creator: ContractAddress,
+            royalty_bps: u128,
         ) {
             assert(get_caller_address() == self.registry.read(), 'Only registry');
 
             // R-05: token IDs must be > 0 (IPCollection assigns IDs starting at 1)
             assert(token_id != 0, 'Token ID cannot be zero');
             assert(!creator.is_zero(), 'Creator is zero address');
-            assert(token_uri.len() > 0 && token_uri.len() <= MAX_TOKEN_URI_LEN, 'Invalid URI length');
+            assert(
+                token_uri.len() > 0 && token_uri.len() <= MAX_TOKEN_URI_LEN, 'Invalid URI length',
+            );
+            // EIP-2981 bound — protocol-neutral standard maximum (app caps tighter).
+            assert(royalty_bps <= MAX_ROYALTY_BPS, 'Royalty bps too high');
 
-            // mint intentionally does not call safe_mint; IP records can be minted to any
+            // mint intentionally does NOT call safe_mint; IP records can be minted to any
             // account/contract without requiring an ERC721 receiver callback.
+            // INVARIANT (D-1): this must never become safe_mint — IPCollection relies on the
+            // absence of a receiver callback to keep its `total_minted` accounting reentrancy-free.
             self.erc721.mint(recipient, token_id);
             self.uris.write(token_id, token_uri);
 
@@ -172,6 +200,11 @@ pub mod IPNft {
 
             // COMP-03: store registration timestamp — permanent, never overwritten
             self.token_registered_at.write(token_id, get_block_timestamp());
+
+            // EIP-2981: per-token royalty, receiver = immutable creator, set once at mint.
+            // Never the (mutable) collection owner — a default-to-owner would let royalties
+            // silently redirect on ownership transfer. No setter is exposed, so this is final.
+            self.erc2981._set_token_royalty(token_id, creator, royalty_bps);
         }
 
         /// Archives a token permanently.
@@ -199,6 +232,11 @@ pub mod IPNft {
         /// Returns the address of the immutable registry (IPCollection factory).
         fn get_registry(self: @ContractState) -> ContractAddress {
             self.registry.read()
+        }
+
+        /// Returns the immutable implementation version for this deployed IPNft class.
+        fn version(self: @ContractState) -> ByteArray {
+            "0.4.0"
         }
 
         /// Returns the informational base URI of the collection.

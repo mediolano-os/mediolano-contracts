@@ -1,7 +1,9 @@
 pub mod GenerativeArt;
+pub mod GenerativeArtFactory;
 
 pub mod interfaces {
     pub mod IGenerativeArt;
+    pub mod IGenerativeArtFactory;
 }
 
 pub mod mock_contracts {
@@ -12,4 +14,5 @@ pub mod mock_contracts {
 #[cfg(test)]
 mod tests {
     mod GenerativeArtTest;
+    mod GenerativeArtFactoryTest;
 }

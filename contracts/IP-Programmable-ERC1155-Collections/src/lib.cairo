@@ -10,6 +10,7 @@ pub mod interfaces {
 pub mod mock_contracts {
     pub mod ERC1155Receiver;
     pub mod MockAccount;
+    pub mod ReentrantMintReceiver;
 }
 
 #[cfg(test)]

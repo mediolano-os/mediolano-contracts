@@ -23,10 +23,9 @@ pub mod IPNft {
     );
     component!(path: ERC2981Component, storage: erc2981, event: ERC2981Event);
 
-    // COMP-01: UpgradeableComponent intentionally removed.
+    // UpgradeableComponent intentionally removed.
     // IPNft contracts are permanently immutable by design — the per-token URI, creator,
-    // and timestamp constitute the legal IP registration record under the Berne Convention.
-    // Upgradeability of this contract would allow altering that record, which is prohibited.
+    // and timestamp constitute the legal IP record under the Berne Convention.
 
     // No owner or role admin exists. Mint/archive authority is the immutable
     // registry address written once in the constructor.
@@ -59,11 +58,11 @@ pub mod IPNft {
         collection_id: u256,
         /// Per-token metadata URIs — written once at mint, never updated (immutable).
         uris: Map<u256, ByteArray>,
-        /// COMP-02: Original creator per token — immutable Berne Convention authorship record.
+        /// Original creator per token — immutable Berne Convention authorship record.
         token_creators: Map<u256, ContractAddress>,
-        /// COMP-03: Registration timestamp per token — immutable proof of creation date.
+        /// Registration timestamp per token — immutable proof of creation date.
         token_registered_at: Map<u256, u64>,
-        /// COMP-05: Archived state per token — preserves the record while marking as inactive.
+        /// Archived state per token — preserves the record while marking as inactive.
         token_archived: Map<u256, bool>,
         #[substorage(v0)]
         erc721: ERC721Component::Storage,
@@ -89,7 +88,7 @@ pub mod IPNft {
     }
 
     /// Constructor.
-    /// R-04: `owner` parameter removed — OwnableComponent is gone.
+    /// `owner` parameter removed — OwnableComponent is gone.
     /// The `registry` (IPCollection factory address) is immutable and is the only
     /// address allowed to mint or archive.
     #[constructor]
@@ -125,7 +124,7 @@ pub mod IPNft {
             auth: ContractAddress,
         ) {
             let mut contract_state = self.get_contract_mut();
-            // COMP-05: Block any transfer of an archived token.
+            // Block any transfer of an archived token.
             // Archived tokens are permanently immobile — their record is preserved as-is.
             // This fires on both mint and transfer; Map defaults to false so mints pass cleanly.
             assert(!contract_state.token_archived.read(token_id), 'Token is archived');
@@ -167,8 +166,8 @@ pub mod IPNft {
         /// Only callable by the immutable IPCollection factory.
         ///
         /// token_uri is stored permanently and must not be empty.
-        /// COMP-02: creator is stored as the immutable original_creator.
-        /// COMP-03: block timestamp is stored as the immutable registered_at.
+        /// creator is stored as the immutable original_creator.
+        /// block timestamp is stored as the immutable registered_at.
         fn mint(
             ref self: ContractState,
             recipient: ContractAddress,
@@ -179,7 +178,7 @@ pub mod IPNft {
         ) {
             assert(get_caller_address() == self.registry.read(), 'Only registry');
 
-            // R-05: token IDs must be > 0 (IPCollection assigns IDs starting at 1)
+            // token IDs must be > 0 (IPCollection assigns IDs starting at 1)
             assert(token_id != 0, 'Token ID cannot be zero');
             assert(!creator.is_zero(), 'Creator is zero address');
             assert(
@@ -190,15 +189,15 @@ pub mod IPNft {
 
             // mint intentionally does NOT call safe_mint; IP records can be minted to any
             // account/contract without requiring an ERC721 receiver callback.
-            // INVARIANT (D-1): this must never become safe_mint — IPCollection relies on the
+            // INVARIANT: this must never become safe_mint — IPCollection relies on the
             // absence of a receiver callback to keep its `total_minted` accounting reentrancy-free.
             self.erc721.mint(recipient, token_id);
             self.uris.write(token_id, token_uri);
 
-            // COMP-02: store original creator — permanent, never overwritten
+            // store original creator — permanent, never overwritten
             self.token_creators.write(token_id, creator);
 
-            // COMP-03: store registration timestamp — permanent, never overwritten
+            // store registration timestamp — permanent, never overwritten
             self.token_registered_at.write(token_id, get_block_timestamp());
 
             // EIP-2981: per-token royalty, receiver = immutable creator, set once at mint.
@@ -236,7 +235,7 @@ pub mod IPNft {
 
         /// Returns the immutable implementation version for this deployed IPNft class.
         fn version(self: @ContractState) -> ByteArray {
-            "0.4.0"
+            "0.5.0"
         }
 
         /// Returns the informational base URI of the collection.

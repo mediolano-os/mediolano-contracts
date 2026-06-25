@@ -1,7 +1,7 @@
 // DESIGN: IPCollectionFactory is the single deploy point for all IPCollection contracts.
 // Anyone can deploy a new collection — the caller becomes its owner and IP creator.
 // The factory is fully immutable and ownerless: the collection class hash is fixed at
-// deploy time. Protocol evolution = deploy a new factory, never mutate this one.
+// deploy time.
 
 #[starknet::contract]
 pub mod IPCollectionFactory {
@@ -57,7 +57,7 @@ pub mod IPCollectionFactory {
         }
 
         fn version(self: @ContractState) -> ByteArray {
-            "0.3.0"
+            "0.4.0"
         }
 
         fn deploy_collection(

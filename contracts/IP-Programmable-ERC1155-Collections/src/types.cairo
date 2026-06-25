@@ -2,6 +2,11 @@ use starknet::ContractAddress;
 
 pub const MAX_TOKEN_URI_LEN: u32 = 2048;
 
+/// Collection metadata length bounds (mirror MIP-Collections-ERC721).
+pub const MAX_NAME_LEN: u32 = 256;
+pub const MAX_SYMBOL_LEN: u32 = 64;
+pub const MAX_BASE_URI_LEN: u32 = 2048;
+
 /// All IP provenance fields for a token, returned in a single call.
 /// Avoids multiple cross-contract calls for indexers and frontends.
 #[derive(Drop, Serde)]

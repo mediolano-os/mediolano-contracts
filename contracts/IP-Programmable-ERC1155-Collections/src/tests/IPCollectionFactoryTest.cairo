@@ -93,7 +93,7 @@ fn test_factory_constructor_class_hash() {
 #[test]
 fn test_factory_version() {
     let (factory, _) = deploy_factory();
-    assert_eq!(factory.version(), "0.3.0");
+    assert_eq!(factory.version(), "0.4.0");
 }
 
 // ─── deploy_collection

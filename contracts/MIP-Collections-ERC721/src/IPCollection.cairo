@@ -86,7 +86,7 @@ pub mod IPCollection {
         pub collection_id: u256,
         pub token_ids: Span<u256>,
         pub owners: Array<ContractAddress>,
-        // D-2: per-token URIs included so event-only/indexer-independent readers can
+        // per-token URIs included so event-only/indexer-independent readers can
         // reconstruct batch-minted metadata without per-token `token_uri` reads.
         pub metadata_uris: Array<ByteArray>,
         pub operator: ContractAddress,
@@ -149,7 +149,7 @@ pub mod IPCollection {
             let caller = get_caller_address();
             assert(!caller.is_zero(), 'Caller is zero address');
 
-            // L-02: validate non-empty name and symbol
+            // validate non-empty name and symbol
             assert(name.len() > 0 && name.len() <= MAX_NAME_LEN, 'Invalid name length');
             assert(symbol.len() > 0 && symbol.len() <= MAX_SYMBOL_LEN, 'Invalid symbol length');
             assert(base_uri.len() <= MAX_BASE_URI_LEN, 'Base URI too long');
@@ -190,7 +190,7 @@ pub mod IPCollection {
         }
 
         /// Mints a new token in the specified collection to the recipient address.
-        /// Only the collection owner can mint. Token IDs start at 1 (R-05).
+        /// Only the collection owner can mint. Token IDs start at 1.
         /// `royalty_bps` sets the token's immutable EIP-2981 secondary-sale royalty
         /// (receiver = the minting collection owner, recorded as the token creator).
         fn mint(
@@ -209,10 +209,10 @@ pub mod IPCollection {
 
             let mut collection_stats = self.collection_stats.read(collection_id);
 
-            // R-05: token IDs start at 1 — total_minted + 1 gives the next ID
+            // token IDs start at 1 — total_minted + 1 gives the next ID
             let next_token_id = collection_stats.total_minted + 1;
 
-            // D-1 (CEI): advance + persist stats BEFORE the external mint call. A revert in
+            // CEI: advance + persist stats BEFORE the external mint call. A revert in
             // ip_nft.mint rolls this back; doing it first removes any reentrancy ID-collision
             // surface regardless of future mint internals.
             collection_stats.total_minted = next_token_id;
@@ -249,7 +249,7 @@ pub mod IPCollection {
             let n = recipients.len();
             assert(n > 0, 'Recipients array is empty');
 
-            // M-01: all input arrays must be the same length
+            // all input arrays must be the same length
             assert(token_uris.len() == n, 'Array lengths mismatch');
             assert(royalty_bps.len() == n, 'Array lengths mismatch');
 
@@ -263,7 +263,7 @@ pub mod IPCollection {
             let base = collection_stats.total_minted;
             let timestamp = get_block_timestamp();
 
-            // D-1 (CEI): advance + persist stats BEFORE any external mint call.
+            // CEI: advance + persist stats BEFORE any external mint call.
             collection_stats.total_minted = base + n.into();
             collection_stats.last_mint_time = timestamp;
             self.collection_stats.entry(collection_id).write(collection_stats);
@@ -278,7 +278,7 @@ pub mod IPCollection {
                 let token_uri: ByteArray = token_uris.at(i).clone();
                 assert(!recipient.is_zero(), 'Recipient is zero address');
 
-                // R-05: token IDs start at 1
+                // token IDs start at 1
                 let next_token_id = base + i.into() + 1;
                 ip_nft.mint(recipient, next_token_id, token_uri, operator, *royalty_bps.at(i));
                 token_ids.append(next_token_id);
@@ -374,7 +374,7 @@ pub mod IPCollection {
         }
 
         /// Batch archives multiple tokens (parallel `collection_ids` / `token_ids`).
-        /// C-01: ownership verified for every token inside the loop.
+        /// Ownership verified for every token inside the loop.
         /// Stats are written once per unique collection, not once per token.
         fn batch_archive(
             ref self: ContractState, collection_ids: Array<u256>, token_ids: Array<u256>,
@@ -399,7 +399,7 @@ pub mod IPCollection {
                 let collection = self.collections.read(collection_id);
                 assert(!collection.ip_nft.is_zero(), 'Invalid collection');
 
-                // C-01: verify ownership for every token
+                // verify ownership for every token
                 let token_owner = IERC721Dispatcher { contract_address: collection.ip_nft }
                     .owner_of(token_id);
                 assert(token_owner == caller, 'Caller not token owner');
@@ -441,8 +441,8 @@ pub mod IPCollection {
 
         /// Transfers a token from its current owner to `to`.
         /// The IPCollection contract must be approved for the token.
-        /// O-3: `from` is derived from on-chain ownership (was a redundant argument).
-        /// M-02: caller must be the token owner or an approved operator.
+        /// `from` is derived from on-chain ownership (was a redundant argument).
+        /// caller must be the token owner or an approved operator.
         fn transfer_token(
             ref self: ContractState, to: ContractAddress, collection_id: u256, token_id: u256,
         ) {
@@ -452,24 +452,13 @@ pub mod IPCollection {
             let caller = get_caller_address();
             let ip_nft = IERC721Dispatcher { contract_address: collection.ip_nft };
 
-            let token_owner = ip_nft.owner_of(token_id);
-            let approved = ip_nft.get_approved(token_id);
             let registry = get_contract_address();
-            // M-02: registry must be approved, and caller must be owner or approved operator
-            assert(
-                approved == registry || ip_nft.is_approved_for_all(token_owner, registry),
-                'Contract not approved',
-            );
-            assert(
-                caller == token_owner
-                    || approved == caller
-                    || ip_nft.is_approved_for_all(token_owner, caller),
-                'Not authorized',
-            );
+            // registry must be approved, and caller must be owner or approved operator.
+            let token_owner = assert_token_transfer_authorized(ip_nft, token_id, caller, registry);
 
             ip_nft.transfer_from(token_owner, to, token_id);
 
-            // R-03: update protocol-routed transfer stats
+            // update protocol-routed transfer stats
             let timestamp = get_block_timestamp();
             let mut collection_stats = self.collection_stats.read(collection_id);
             collection_stats.protocol_routed_transfers += 1;
@@ -485,11 +474,10 @@ pub mod IPCollection {
         }
 
         /// Batch transfers multiple tokens (parallel `collection_ids` / `token_ids`) from `from`.
-        /// H-01: approval check and caller authorization enforced for every token.
+        /// approval check and caller authorization enforced for every token.
         /// Stats are written once per unique collection, not once per token.
         fn batch_transfer(
             ref self: ContractState,
-            from: ContractAddress,
             to: ContractAddress,
             collection_ids: Array<u256>,
             token_ids: Array<u256>,
@@ -500,8 +488,17 @@ pub mod IPCollection {
 
             let caller = get_caller_address();
             let timestamp = get_block_timestamp();
-            // O-2: registry is invariant — read once, not per iteration.
+            // registry is invariant — read once, not per iteration.
             let registry = get_contract_address();
+
+            // Derive the sender from on-chain ownership of the first token (rather than
+            // trusting a caller argument). The per-token transfer_from below carries OZ's
+            // `previous_owner == from` assert, so a batch spanning two owners reverts —
+            // preserving the single-owner-batch invariant.
+            let first_collection = self.collections.read(*collection_ids.at(0));
+            assert(!first_collection.ip_nft.is_zero(), 'Invalid collection');
+            let from = IERC721Dispatcher { contract_address: first_collection.ip_nft }
+                .owner_of(*token_ids.at(0));
 
             // Accumulate transfer counts per collection_id to minimise storage writes
             let mut unique_cols: Array<u256> = array![];
@@ -517,21 +514,9 @@ pub mod IPCollection {
 
                 let ip_nft = IERC721Dispatcher { contract_address: collection.ip_nft };
 
-                let token_owner = ip_nft.owner_of(token_id);
-                let approved = ip_nft.get_approved(token_id);
-
-                // H-01: require contract approval
-                assert(
-                    approved == registry || ip_nft.is_approved_for_all(token_owner, registry),
-                    'Contract not approved',
-                );
-                // H-01: require caller is authorized
-                assert(
-                    caller == token_owner
-                        || approved == caller
-                        || ip_nft.is_approved_for_all(token_owner, caller),
-                    'Not authorized',
-                );
+                // registry approved + caller authorized for this token. The sender is
+                // the batch-derived `from`; transfer_from asserts each token shares that owner.
+                let _ = assert_token_transfer_authorized(ip_nft, token_id, caller, registry);
 
                 ip_nft.transfer_from(from, to, token_id);
 
@@ -607,7 +592,7 @@ pub mod IPCollection {
 
         /// Returns the immutable implementation version for this deployed registry class.
         fn version(self: @ContractState) -> ByteArray {
-            "0.4.0"
+            "0.5.0"
         }
 
         /// Retrieves statistics for a specific collection.
@@ -665,5 +650,29 @@ pub mod IPCollection {
             let collection = self.collections.read(collection_id);
             !collection.ip_nft.is_zero() && collection.owner == owner
         }
+    }
+
+    /// Asserts the registry is approved for `token_id` and `caller` is authorized to move it
+    /// (token owner or an approved operator); returns the on-chain token owner. Shared by
+    /// `transfer_token` and `batch_transfer` (was a duplicated approval/auth block).
+    fn assert_token_transfer_authorized(
+        ip_nft: IERC721Dispatcher,
+        token_id: u256,
+        caller: ContractAddress,
+        registry: ContractAddress,
+    ) -> ContractAddress {
+        let token_owner = ip_nft.owner_of(token_id);
+        let approved = ip_nft.get_approved(token_id);
+        assert(
+            approved == registry || ip_nft.is_approved_for_all(token_owner, registry),
+            'Contract not approved',
+        );
+        assert(
+            caller == token_owner
+                || approved == caller
+                || ip_nft.is_approved_for_all(token_owner, caller),
+            'Not authorized',
+        );
+        token_owner
     }
 }

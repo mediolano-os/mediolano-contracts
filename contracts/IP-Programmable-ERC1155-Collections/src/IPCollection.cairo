@@ -2,7 +2,6 @@
 // beyond the collection owner's mint rights. Each collection is a standalone ERC-1155
 // contract deployed by IPCollectionFactory. The original creator address and registration
 // timestamp are written once at the first mint of each token type and can never be changed.
-// This constitutes the immutable IP provenance record under the Berne Convention standard.
 //
 // URI strategy:
 //   - `base_uri` is the collection-level metadata URI set at deploy time (e.g. an IPFS
@@ -29,7 +28,9 @@ pub mod IPCollection {
     };
     use starknet::{ContractAddress, get_block_timestamp, get_caller_address};
     use crate::interfaces::IIPCollection::IIPCollection;
-    use crate::types::{MAX_TOKEN_URI_LEN, TokenData};
+    use crate::types::{
+        MAX_BASE_URI_LEN, MAX_NAME_LEN, MAX_SYMBOL_LEN, MAX_TOKEN_URI_LEN, TokenData,
+    };
 
     component!(path: SRC5Component, storage: src5, event: SRC5Event);
     component!(path: OwnableComponent, storage: ownable, event: OwnableEvent);
@@ -57,6 +58,9 @@ pub mod IPCollection {
     impl ERC2981Impl = ERC2981Component::ERC2981Impl<ContractState>;
     #[abi(embed_v0)]
     impl ERC2981InfoImpl = ERC2981Component::ERC2981InfoImpl<ContractState>;
+    // Royalty here is owner-mutable (set_default_royalty / set_token_royalty). Marketplaces
+    // bound any payout to the order's signed royalty cap, so a later change cannot exceed
+    // what a seller agreed to at listing time.
     #[abi(embed_v0)]
     impl ERC2981AdminOwnableImpl =
         ERC2981Component::ERC2981AdminOwnableImpl<ContractState>;
@@ -139,6 +143,10 @@ pub mod IPCollection {
         owner: ContractAddress,
     ) {
         assert(!owner.is_zero(), 'Owner is zero address');
+        // Bound collection metadata lengths (the factory enforces non-empty name/symbol).
+        assert(name.len() <= MAX_NAME_LEN, 'Invalid name length');
+        assert(symbol.len() <= MAX_SYMBOL_LEN, 'Invalid symbol length');
+        assert(base_uri.len() <= MAX_BASE_URI_LEN, 'Base URI too long');
         // Initialize ERC1155 with empty base URI — we manage URIs ourselves.
         self.erc1155.initializer("");
         self.ownable.initializer(owner);
@@ -191,7 +199,7 @@ pub mod IPCollection {
         }
 
         fn version(self: @ContractState) -> ByteArray {
-            "0.3.0"
+            "0.4.0"
         }
 
         // ── Minting
@@ -203,8 +211,10 @@ pub mod IPCollection {
             self.ownable.assert_only_owner();
             assert(!to.is_zero(), 'Recipient is zero address');
             let token_id = self.next_token_id.read();
-            self._mint_new(get_caller_address(), to, token_id, value, token_uri);
+            // CEI: advance the id counter before the external mint, so a reentrant
+            // mint_edition during the ERC1155 acceptance hook receives a fresh id.
             self.next_token_id.write(token_id + 1);
+            self._mint_new(get_caller_address(), to, token_id, value, token_uri);
             token_id
         }
 
@@ -219,13 +229,15 @@ pub mod IPCollection {
             assert(values.len() == token_uris.len(), 'Array length mismatch');
             let creator = get_caller_address();
             let mut ids: Array<u256> = array![];
-            let mut id = self.next_token_id.read();
+            let start = self.next_token_id.read();
+            // CEI: reserve the whole id range before any external mint.
+            self.next_token_id.write(start + values.len().into());
+            let mut id = start;
             for i in 0..values.len() {
                 self._mint_new(creator, to, id, *values.at(i), token_uris.at(i).clone());
                 ids.append(id);
                 id = id + 1;
             }
-            self.next_token_id.write(id);
             ids.span()
         }
 
@@ -302,6 +314,9 @@ pub mod IPCollection {
             value: u256,
             token_uri: ByteArray,
         ) {
+            // Defense-in-depth: a freshly allocated id must never already exist, so token
+            // provenance can never be overwritten even if id allocation regresses.
+            assert(self.token_creators.read(token_id).is_zero(), 'Token already exists');
             assert(value > 0, 'Value must be > 0');
             assert(
                 token_uri.len() > 0 && token_uri.len() <= MAX_TOKEN_URI_LEN, 'Invalid URI length',

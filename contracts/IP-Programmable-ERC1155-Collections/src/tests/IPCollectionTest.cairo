@@ -2,6 +2,9 @@ use ip_programmable_erc1155_collections::IPCollection::IPCollection::{Event, IPM
 use ip_programmable_erc1155_collections::interfaces::IIPCollection::{
     IIPCollectionDispatcher, IIPCollectionDispatcherTrait,
 };
+use ip_programmable_erc1155_collections::mock_contracts::ReentrantMintReceiver::ReentrantMintReceiver::{
+    IReentrantConfigDispatcher, IReentrantConfigDispatcherTrait,
+};
 use openzeppelin::access::ownable::interface::{IOwnableDispatcher, IOwnableDispatcherTrait};
 use openzeppelin::introspection::interface::{ISRC5Dispatcher, ISRC5DispatcherTrait};
 use openzeppelin::token::common::erc2981::interface::{
@@ -81,6 +84,35 @@ fn deploy_receiver() -> ContractAddress {
     address
 }
 
+/// Deploy a malicious receiver that re-enters mint_edition on first receipt (F2).
+fn deploy_reentrant() -> ContractAddress {
+    let declare_result = declare("ReentrantMintReceiver").unwrap();
+    let (address, _) = declare_result.contract_class().deploy(@array![]).unwrap();
+    address
+}
+
+#[test]
+fn test_reentrant_mint_does_not_reuse_id_or_overwrite_provenance() {
+    // Owner is the malicious receiver, so its reentrant (owner-gated) mint_edition passes.
+    let receiver = deploy_reentrant();
+    let (collection, address) = deploy_collection(receiver, BASE_URI());
+
+    // Point the receiver back at the collection; minting to it fires the hook → reentry.
+    IReentrantConfigDispatcher { contract_address: receiver }.set_target(address);
+
+    cheat_caller_address(address, receiver, CheatSpan::TargetCalls(1));
+    let first_id = collection.mint_edition(receiver, 10, IPFS_URI());
+
+    // The reentrant mint must allocate a DISTINCT id (2), not reuse id 1.
+    assert_eq!(first_id, TOKEN_ID_1);
+    assert_eq!(collection.total_editions(), TOKEN_ID_2); // exactly two distinct editions
+    assert_eq!(collection.get_token_creator(TOKEN_ID_1), receiver);
+    assert_eq!(collection.get_token_creator(TOKEN_ID_2), receiver);
+    // id 1's provenance is the OUTER mint's URI, never overwritten by the reentry.
+    let md = IERC1155MetadataURIDispatcher { contract_address: address };
+    assert_eq!(md.uri(TOKEN_ID_1), IPFS_URI());
+}
+
 /// Deploy IPCollection with given owner and base_uri.
 fn deploy_collection(
     owner: ContractAddress, base_uri: ByteArray,
@@ -100,6 +132,29 @@ fn deploy_collection(
 
     let dispatcher = IIPCollectionDispatcher { contract_address: address };
     (dispatcher, address)
+}
+
+#[test]
+fn test_constructor_rejects_overlong_name() {
+    // 257 > MAX_NAME_LEN (256). A constructor revert surfaces via the deploy Result's
+    // Err payload (unwrap would rewrap it as "Result::unwrap failed."), so match on it
+    // to assert the precise revert reason.
+    let mut long_name: ByteArray = "";
+    for _ in 0_u32..257_u32 {
+        long_name.append_byte(97_u8);
+    }
+    let mut calldata: Array<felt252> = array![];
+    long_name.serialize(ref calldata);
+    let symbol: ByteArray = "TIP";
+    symbol.serialize(ref calldata);
+    let base: ByteArray = BASE_URI();
+    base.serialize(ref calldata);
+    OWNER().serialize(ref calldata);
+    let contract_class = declare("IPCollection").unwrap().contract_class();
+    match contract_class.deploy(@calldata) {
+        Result::Ok(_) => assert(false, 'expected revert'),
+        Result::Err(data) => assert(*data.at(0) == 'Invalid name length', 'wrong revert reason'),
+    }
 }
 
 // ─── Constructor / metadata
@@ -152,7 +207,7 @@ fn test_constructor_empty_base_uri() {
 fn test_contract_version() {
     let owner = OWNER();
     let (collection, _) = deploy_collection(owner, BASE_URI());
-    assert_eq!(collection.version(), "0.3.0");
+    assert_eq!(collection.version(), "0.4.0");
 }
 
 // ─── uri() fallback behaviour

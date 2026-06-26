@@ -682,7 +682,6 @@ fn test_batch_transfer_tokens_success() {
     cheat_caller_address(ip_address, from_user, CheatSpan::TargetCalls(1));
     dispatcher
         .batch_transfer(
-            from_user,
             to_user,
             array![collection_id, collection_id],
             array![*token_ids.at(0), *token_ids.at(1)],
@@ -709,7 +708,7 @@ fn test_batch_transfer_not_approved() {
         .batch_mint(collection_id, array![from_user], array![IPFS_URI()], array![ROYALTY_BPS]);
 
     cheat_caller_address(ip_address, from_user, CheatSpan::TargetCalls(1));
-    dispatcher.batch_transfer(from_user, to_user, array![collection_id], array![*token_ids.at(0)]);
+    dispatcher.batch_transfer(to_user, array![collection_id], array![*token_ids.at(0)]);
 }
 
 #[test]
@@ -733,7 +732,7 @@ fn test_batch_transfer_unauthorized_caller() {
     erc721.approve(ip_address, *token_ids.at(0));
 
     cheat_caller_address(ip_address, attacker, CheatSpan::TargetCalls(1));
-    dispatcher.batch_transfer(from_user, to_user, array![collection_id], array![*token_ids.at(0)]);
+    dispatcher.batch_transfer(to_user, array![collection_id], array![*token_ids.at(0)]);
 }
 
 #[test]
@@ -750,8 +749,7 @@ fn test_batch_transfer_invalid_collection() {
         .batch_mint(collection_id, array![from_user], array![IPFS_URI()], array![ROYALTY_BPS]);
 
     cheat_caller_address(ip_address, from_user, CheatSpan::TargetCalls(1));
-    dispatcher
-        .batch_transfer(from_user, to_user, array![collection_id + 1], array![*token_ids.at(0)]);
+    dispatcher.batch_transfer(to_user, array![collection_id + 1], array![*token_ids.at(0)]);
 }
 
 #[test]
@@ -768,7 +766,7 @@ fn test_batch_transfer_length_mismatch() {
 
     cheat_caller_address(ip_address, from_user, CheatSpan::TargetCalls(1));
     // 1 collection id but 2 token ids
-    dispatcher.batch_transfer(from_user, to_user, array![collection_id], array![1, 2]);
+    dispatcher.batch_transfer(to_user, array![collection_id], array![1, 2]);
 }
 
 #[test]
@@ -1029,12 +1027,12 @@ fn test_get_collection_count() {
 #[test]
 fn test_contract_version() {
     let (dispatcher, ip_address) = deploy_contract();
-    assert(dispatcher.version() == "0.4.0", 'Registry version mismatch');
+    assert(dispatcher.version() == "0.5.0", 'Registry version mismatch');
 
     let collection_id = setup_collection(dispatcher, ip_address);
     let collection_data = dispatcher.get_collection(collection_id);
     let nft = IIPNftDispatcher { contract_address: collection_data.ip_nft };
-    assert(nft.version() == "0.4.0", 'IPNft version mismatch');
+    assert(nft.version() == "0.5.0", 'IPNft version mismatch');
 }
 
 // ─── get_token validation

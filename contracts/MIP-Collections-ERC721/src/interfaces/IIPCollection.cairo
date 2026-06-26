@@ -56,11 +56,11 @@ pub trait IIPCollection<ContractState> {
         ref self: ContractState, to: ContractAddress, collection_id: u256, token_id: u256,
     );
 
-    /// Batch transfers tokens (parallel `collection_ids` / `token_ids`, equal length) from
-    /// `from` to `to`. The contract must be approved and the caller authorized for each token.
+    /// Batch transfers tokens (parallel `collection_ids` / `token_ids`, equal length) to `to`.
+    /// The sender is derived from on-chain ownership of the first token; the contract must be
+    /// approved and the caller authorized for each token (a batch must share one owner).
     fn batch_transfer(
         ref self: ContractState,
-        from: ContractAddress,
         to: ContractAddress,
         collection_ids: Array<u256>,
         token_ids: Array<u256>,

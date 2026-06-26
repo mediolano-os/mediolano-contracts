@@ -49,7 +49,7 @@ pub struct CollectionStats {
     pub total_minted: u256,
     /// Total number of tokens archived in the collection.
     pub total_archived: u256,
-    /// D-3: transfers routed through IPCollection only. Direct ERC-721 transfers are NOT counted
+    /// Transfers routed through IPCollection only. Direct ERC-721 transfers are NOT counted
     /// here — reconstruct the full transfer history from IPNft `Transfer` events.
     pub protocol_routed_transfers: u256,
     /// Timestamp of the last mint operation.

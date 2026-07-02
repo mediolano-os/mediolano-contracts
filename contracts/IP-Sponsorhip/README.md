@@ -92,3 +92,12 @@ Rules:
 scarb build
 snforge test   # 24 tests
 ```
+
+## Status
+
+Deployed to Starknet mainnet 2026-07-02:
+`0x044d9b9c3bb29b94685b0a3fe27a5e2dfa30a3637ab55979c718ebcd3268bc2f`. Accepted-bid
+receipt NFTs mint through a second, dedicated `MIP-IP-Factory-ERC721` instance
+(`0x06bcfc4e97758a2abf95af4bd49596efdbfd88ccd740caddc56ad0a4bd095839`), never the
+genesis-mint instance — the receipt is a non-authoritative convenience;
+`is_license_valid()` on this contract is the sole access check.

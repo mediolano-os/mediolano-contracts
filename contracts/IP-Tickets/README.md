@@ -145,4 +145,7 @@ Tested baseline:
 
 ## Status
 
-Pre-production until external security review and deployment rehearsal.
+Deployed to Starknet mainnet 2026-07-02. `IPTicketCollectionFactory`:
+`0x0664c2d6a4da9ee3ff053ceeba7579c01f2fedfd9d2b57b4c07af3734bd4acab`,
+`IPTicketCollection` class hash:
+`0x086f59c416e365e2bee4ceff9f1dcb96198f2342d50ba4621f60b831863adb6`.

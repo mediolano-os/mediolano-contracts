@@ -158,4 +158,7 @@ Current tested dependency baseline:
 
 ## Status
 
-Pre-production until external security review and deployment rehearsal.
+Deployed to Starknet mainnet 2026-07-02. Registry:
+`0x00e189c619b6bb07d78973a149641c59c37eb0716f8584d7520bce12d303eede`,
+`IPClubNFT` class hash:
+`0x02bc9b20cca21b04245e9215bf7121f4d7295b195890e449b472b573017fb889`.

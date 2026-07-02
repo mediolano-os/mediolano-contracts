@@ -1,9 +1,9 @@
 use starknet::ContractAddress;
 
-// A series exists iff `creator != 0` (create_ticket_series rejects a zero
-// caller). `active` gates minting only — never transfers or redemption.
+// A collection exists iff `creator != 0` (create_ticket_collection rejects a
+// zero caller). `active` gates minting only — never transfers or redemption.
 #[derive(Drop, Serde, starknet::Store, Clone)]
-pub struct TicketSeries {
+pub struct TicketCollection {
     pub creator: ContractAddress,
     pub price: u256,
     pub max_supply: u256,
@@ -19,7 +19,7 @@ pub struct TicketSeries {
 pub struct TicketData {
     pub token_id: u256,
     pub owner: ContractAddress,
-    pub series_id: u256,
+    pub collection_id: u256,
     pub creator: ContractAddress,
     pub metadata_uri: ByteArray,
     pub expiration: u64,

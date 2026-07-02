@@ -1,14 +1,14 @@
-use starknet::ContractAddress;
-use crate::types::{TicketData, TicketSeries};
+use starknet::{ClassHash, ContractAddress};
+use crate::types::{TicketCollection, TicketData};
 
 // Protocol discovery ID registered via SRC5.
-// Derivation: starknet_keccak("mediolano.ip-tickets.v2").
-pub const IIP_TICKET_SERVICE_ID: felt252 =
-    0x01362a7858e49627a551fd488764bb296e2e74caaffd1d6a171580904c90c344;
+// Derivation: starknet_keccak("mediolano.ip-ticket-collection.v1").
+pub const IIP_TICKET_COLLECTION_ID: felt252 =
+    0x329801ec79f9a18a441f490a55694aadd00b57e11fc1f2fc561b9bebc68e3d9;
 
 #[starknet::interface]
-pub trait IIPTicketService<TContractState> {
-    fn create_ticket_series(
+pub trait IIPTicketCollection<TContractState> {
+    fn create_ticket_collection(
         ref self: TContractState,
         price: u256,
         max_supply: u256,
@@ -18,25 +18,25 @@ pub trait IIPTicketService<TContractState> {
         metadata_uri: ByteArray,
     ) -> u256;
 
-    fn set_series_active(ref self: TContractState, series_id: u256, active: bool);
+    fn set_collection_active(ref self: TContractState, collection_id: u256, active: bool);
 
-    fn mint_ticket(ref self: TContractState, series_id: u256) -> u256;
+    fn mint_ticket(ref self: TContractState, collection_id: u256) -> u256;
 
     fn redeem_ticket(ref self: TContractState, token_id: u256);
 
-    fn has_valid_ticket(self: @TContractState, user: ContractAddress, series_id: u256) -> bool;
+    fn has_valid_ticket(self: @TContractState, user: ContractAddress, collection_id: u256) -> bool;
 
-    fn get_ticket_series(self: @TContractState, series_id: u256) -> TicketSeries;
+    fn get_ticket_collection(self: @TContractState, collection_id: u256) -> TicketCollection;
 
     fn get_ticket_data(self: @TContractState, token_id: u256) -> TicketData;
 
-    fn get_ticket_series_id(self: @TContractState, token_id: u256) -> u256;
+    fn get_ticket_collection_id(self: @TContractState, token_id: u256) -> u256;
 
     fn get_active_ticket_balance(
-        self: @TContractState, user: ContractAddress, series_id: u256,
+        self: @TContractState, user: ContractAddress, collection_id: u256,
     ) -> u256;
 
-    fn get_last_series_id(self: @TContractState) -> u256;
+    fn get_last_collection_id(self: @TContractState) -> u256;
 
     fn total_supply(self: @TContractState) -> u256;
 
@@ -47,4 +47,18 @@ pub trait IIPTicketService<TContractState> {
     fn royaltyInfo(
         self: @TContractState, token_id: u256, sale_price: u256,
     ) -> (ContractAddress, u256);
+}
+
+// Protocol discovery ID registered via SRC5 on the factory.
+// Derivation: starknet_keccak("mediolano.ip-ticket-collection-factory.v1").
+pub const IIP_TICKET_COLLECTION_FACTORY_ID: felt252 =
+    0x27717c17c18e684321a4326345c6ee264d3a91a7b6f1b54e02de0332fb76f58;
+
+#[starknet::interface]
+pub trait IIPTicketCollectionFactory<TContractState> {
+    fn collection_class_hash(self: @TContractState) -> ClassHash;
+    fn version(self: @TContractState) -> ByteArray;
+    fn deploy_ticket_collection(
+        ref self: TContractState, name: ByteArray, symbol: ByteArray,
+    ) -> ContractAddress;
 }

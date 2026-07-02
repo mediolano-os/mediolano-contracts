@@ -1,4 +1,5 @@
-pub mod IPTicketService;
+pub mod IPTicketCollection;
+pub mod IPTicketCollectionFactory;
 pub mod interface;
 pub mod types;
 

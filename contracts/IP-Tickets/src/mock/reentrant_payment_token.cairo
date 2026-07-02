@@ -12,13 +12,13 @@ pub trait IReentrantPaymentToken<TContractState> {
 pub mod ReentrantPaymentToken {
     use starknet::ContractAddress;
     use starknet::storage::{StoragePointerReadAccess, StoragePointerWriteAccess};
-    use crate::interface::{IIPTicketServiceDispatcher, IIPTicketServiceDispatcherTrait};
+    use crate::interface::{IIPTicketCollectionDispatcher, IIPTicketCollectionDispatcherTrait};
     use crate::mock::reentrant_payment_token::IReentrantPaymentToken;
 
     #[storage]
     struct Storage {
-        ticket_service: ContractAddress,
-        series_id: u256,
+        ticket_collection: ContractAddress,
+        collection_id: u256,
     }
 
     #[event]
@@ -26,9 +26,11 @@ pub mod ReentrantPaymentToken {
     enum Event {}
 
     #[constructor]
-    fn constructor(ref self: ContractState, ticket_service: ContractAddress, series_id: u256) {
-        self.ticket_service.write(ticket_service);
-        self.series_id.write(series_id);
+    fn constructor(
+        ref self: ContractState, ticket_collection: ContractAddress, collection_id: u256,
+    ) {
+        self.ticket_collection.write(ticket_collection);
+        self.collection_id.write(collection_id);
     }
 
     #[abi(embed_v0)]
@@ -39,10 +41,10 @@ pub mod ReentrantPaymentToken {
             recipient: ContractAddress,
             amount: u256,
         ) -> bool {
-            let ticket_service = IIPTicketServiceDispatcher {
-                contract_address: self.ticket_service.read(),
+            let ticket_collection = IIPTicketCollectionDispatcher {
+                contract_address: self.ticket_collection.read(),
             };
-            ticket_service.mint_ticket(self.series_id.read());
+            ticket_collection.mint_ticket(self.collection_id.read());
             true
         }
     }

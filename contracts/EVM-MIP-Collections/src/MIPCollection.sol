@@ -22,8 +22,15 @@ contract MIPCollection is
     string private _baseUriValue;
     uint256 private _nextTokenId;
     mapping(uint256 tokenId => address) private _tokenCreator;
+    mapping(uint256 tokenId => bool) private _archived;
 
     event TokenMinted(uint256 indexed tokenId, address indexed owner, string metadataUri);
+    event TokenMintedBatch(uint256[] tokenIds, address operator);
+    event TokenArchived(uint256 indexed tokenId);
+
+    error MIPLengthMismatch();
+    error MIPTokenArchived(uint256 tokenId);
+    error MIPAlreadyArchived(uint256 tokenId);
 
     constructor() {
         _disableInitializers();
@@ -60,6 +67,43 @@ contract MIPCollection is
         _safeMint(to, tokenId);
         _setTokenURI(tokenId, metadataUri);
         emit TokenMinted(tokenId, to, metadataUri);
+    }
+
+    /// Mints one token per recipient/URI pair. Arrays must align.
+    function batchMint(address[] calldata to, string[] calldata metadataUris)
+        external
+        onlyOwner
+        returns (uint256[] memory tokenIds)
+    {
+        if (to.length != metadataUris.length) revert MIPLengthMismatch();
+        tokenIds = new uint256[](to.length);
+        for (uint256 i = 0; i < to.length; i++) {
+            uint256 tokenId = _nextTokenId;
+            _nextTokenId = tokenId + 1;
+            _tokenCreator[tokenId] = owner();
+            _safeMint(to[i], tokenId);
+            _setTokenURI(tokenId, metadataUris[i]);
+            emit TokenMinted(tokenId, to[i], metadataUris[i]);
+            tokenIds[i] = tokenId;
+        }
+        emit TokenMintedBatch(tokenIds, owner());
+    }
+
+    /// Permanently freezes a token in its current wallet. Archived tokens
+    /// cannot be transferred or burned.
+    function archive(uint256 tokenId) external onlyOwner {
+        _requireOwned(tokenId);
+        if (_archived[tokenId]) revert MIPAlreadyArchived(tokenId);
+        _archived[tokenId] = true;
+        emit TokenArchived(tokenId);
+    }
+
+    function isArchived(uint256 tokenId) external view returns (bool) {
+        return _archived[tokenId];
+    }
+
+    function setDefaultRoyalty(address receiver, uint96 royaltyBps) external onlyOwner {
+        _setDefaultRoyalty(receiver, royaltyBps);
     }
 
     function collectionId() external view returns (uint256) {
@@ -104,5 +148,16 @@ contract MIPCollection is
         returns (bool)
     {
         return super.supportsInterface(interfaceId);
+    }
+
+    /// Transfers (and burns) of archived tokens revert; minting is unaffected
+    /// because a token cannot be archived before it exists.
+    function _update(address to, uint256 tokenId, address auth)
+        internal
+        override
+        returns (address)
+    {
+        if (_archived[tokenId]) revert MIPTokenArchived(tokenId);
+        return super._update(to, tokenId, auth);
     }
 }

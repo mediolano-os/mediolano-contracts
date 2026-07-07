@@ -68,6 +68,62 @@ pub mod mip_collections {
         });
         Ok(())
     }
+
+    /// Mints a new asset into a collection. Core enforces that the signer is
+    /// the collection's authority; the program holds no mint rights.
+    pub fn mint_asset(ctx: Context<MintAsset>, name: String, uri: String) -> Result<()> {
+        let mpl_core_program = ctx.accounts.mpl_core_program.to_account_info();
+        let asset = ctx.accounts.asset.to_account_info();
+        let core_collection = ctx.accounts.core_collection.to_account_info();
+        let authority = ctx.accounts.authority.to_account_info();
+        let recipient = ctx.accounts.recipient.to_account_info();
+        let system_program = ctx.accounts.system_program.to_account_info();
+
+        mpl_core::instructions::CreateV2CpiBuilder::new(&mpl_core_program)
+            .asset(&asset)
+            .collection(Some(&core_collection))
+            .authority(Some(&authority))
+            .payer(&authority)
+            .owner(Some(&recipient))
+            .system_program(&system_program)
+            .name(name)
+            .uri(uri.clone())
+            .invoke()?;
+
+        emit!(AssetMinted {
+            core_collection: ctx.accounts.core_collection.key(),
+            asset: ctx.accounts.asset.key(),
+            owner: ctx.accounts.recipient.key(),
+            uri,
+        });
+        Ok(())
+    }
+}
+
+#[derive(Accounts)]
+pub struct MintAsset<'info> {
+    #[account(mut)]
+    pub authority: Signer<'info>,
+    /// The new Core asset account; a fresh keypair signs its own creation.
+    #[account(mut)]
+    pub asset: Signer<'info>,
+    /// CHECK: validated by mpl-core as the collection the asset joins.
+    #[account(mut)]
+    pub core_collection: UncheckedAccount<'info>,
+    /// CHECK: the asset's initial owner; any address.
+    pub recipient: UncheckedAccount<'info>,
+    /// CHECK: constrained to the Metaplex Core program id.
+    #[account(address = mpl_core::programs::MPL_CORE_ID)]
+    pub mpl_core_program: UncheckedAccount<'info>,
+    pub system_program: Program<'info, System>,
+}
+
+#[event]
+pub struct AssetMinted {
+    pub core_collection: Pubkey,
+    pub asset: Pubkey,
+    pub owner: Pubkey,
+    pub uri: String,
 }
 
 #[derive(Accounts)]

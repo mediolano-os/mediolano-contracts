@@ -1,0 +1,13 @@
+[package]
+name = "tests"
+version = "0.1.0"
+description = "LiteSVM integration tests"
+edition.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+anchor-lang = "1.1.2"
+mip_collections = { path = "../programs/mip-collections", features = ["no-entrypoint"] }
+mpl-core = "0.10.1"
+litesvm = "0.8.0"
+solana-sdk = "3"

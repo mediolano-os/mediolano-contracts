@@ -1,25 +1,127 @@
-pub mod constants;
-pub mod error;
-pub mod instructions;
-pub mod state;
-
 use anchor_lang::prelude::*;
-
-pub use constants::*;
-pub use instructions::*;
-pub use state::*;
 
 declare_id!("C6vmifH7NSUttWfCREMUF5jGjFAn74aXT6pcSCowvpGq");
 
+/// IP collection issuance over Metaplex Core. Permissionless and zero-fee:
+/// anyone creates a collection, the creator owns it (collection authority and
+/// royalty beneficiary), and the registry records it under a sequential id
+/// while holding no rights over it.
 #[program]
-pub mod solana_mip_collections {
+pub mod mip_collections {
     use super::*;
 
-    pub fn initialize(ctx: Context<Initialize>) -> Result<()> {
-        crate::instructions::initialize::handle_initialize(ctx)
-    }
+    /// Creates a new Core collection owned by the caller, with the Core
+    /// Royalties plugin when `royalty_bps > 0` (creator as sole beneficiary).
+    pub fn create_collection(
+        ctx: Context<CreateCollection>,
+        name: String,
+        uri: String,
+        royalty_bps: u16,
+    ) -> Result<()> {
+        require!(royalty_bps <= 10_000, MipError::RoyaltyBpsTooHigh);
 
-    pub fn increment(ctx: Context<Increment>) -> Result<()> {
-        crate::instructions::increment::handle_increment(ctx)
+        let counter = &mut ctx.accounts.registry_counter;
+        counter.count = counter.count.checked_add(1).unwrap();
+        let collection_id = counter.count;
+
+        let mut plugins: Vec<mpl_core::types::PluginAuthorityPair> = vec![];
+        if royalty_bps > 0 {
+            plugins.push(mpl_core::types::PluginAuthorityPair {
+                plugin: mpl_core::types::Plugin::Royalties(mpl_core::types::Royalties {
+                    basis_points: royalty_bps,
+                    creators: vec![mpl_core::types::Creator {
+                        address: ctx.accounts.creator.key(),
+                        percentage: 100,
+                    }],
+                    rule_set: mpl_core::types::RuleSet::None,
+                }),
+                authority: None,
+            });
+        }
+
+        let mpl_core_program = ctx.accounts.mpl_core_program.to_account_info();
+        let core_collection = ctx.accounts.core_collection.to_account_info();
+        let creator = ctx.accounts.creator.to_account_info();
+        let system_program = ctx.accounts.system_program.to_account_info();
+
+        mpl_core::instructions::CreateCollectionV2CpiBuilder::new(&mpl_core_program)
+            .collection(&core_collection)
+            .update_authority(Some(&creator))
+            .payer(&creator)
+            .system_program(&system_program)
+            .name(name.clone())
+            .uri(uri.clone())
+            .plugins(plugins)
+            .invoke()?;
+
+        let record = &mut ctx.accounts.collection_record;
+        record.collection_id = collection_id;
+        record.core_collection = ctx.accounts.core_collection.key();
+        record.creator = ctx.accounts.creator.key();
+
+        emit!(CollectionCreated {
+            collection_id,
+            core_collection: ctx.accounts.core_collection.key(),
+            creator: ctx.accounts.creator.key(),
+            name,
+            uri,
+        });
+        Ok(())
     }
+}
+
+#[derive(Accounts)]
+pub struct CreateCollection<'info> {
+    #[account(mut)]
+    pub creator: Signer<'info>,
+    /// The new Core collection account; a fresh keypair signs its own creation.
+    #[account(mut)]
+    pub core_collection: Signer<'info>,
+    #[account(
+        init_if_needed,
+        payer = creator,
+        space = 8 + 8,
+        seeds = [b"counter"],
+        bump
+    )]
+    pub registry_counter: Account<'info, RegistryCounter>,
+    #[account(
+        init,
+        payer = creator,
+        space = 8 + 8 + 32 + 32,
+        seeds = [b"collection", core_collection.key().as_ref()],
+        bump
+    )]
+    pub collection_record: Account<'info, CollectionRecord>,
+    /// CHECK: constrained to the Metaplex Core program id.
+    #[account(address = mpl_core::programs::MPL_CORE_ID)]
+    pub mpl_core_program: UncheckedAccount<'info>,
+    pub system_program: Program<'info, System>,
+}
+
+#[account]
+pub struct RegistryCounter {
+    pub count: u64,
+}
+
+#[account]
+pub struct CollectionRecord {
+    pub collection_id: u64,
+    pub core_collection: Pubkey,
+    pub creator: Pubkey,
+}
+
+#[event]
+pub struct CollectionCreated {
+    pub collection_id: u64,
+    pub core_collection: Pubkey,
+    pub creator: Pubkey,
+    pub name: String,
+    pub uri: String,
+}
+
+#[error_code]
+pub enum MipError {
+    #[msg("royalty basis points exceed 10000")]
+    RoyaltyBpsTooHigh,
 }

@@ -8,6 +8,7 @@ rust-version.workspace = true
 [dependencies]
 anchor-lang = "1.1.2"
 mip_collections = { path = "../programs/mip-collections", features = ["no-entrypoint"] }
-mpl-core = "0.10.1"
-litesvm = "0.8.0"
+mpl-core = "0.12.1"
+litesvm = "0.13.1"
 solana-sdk = "3"
+borsh = "1"

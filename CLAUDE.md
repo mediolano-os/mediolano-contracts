@@ -148,3 +148,25 @@ Build & test:
     cd contracts/Solana-MIP-Collections
     anchor build
     cargo test
+
+### Soroban-MIP-Collections (`contracts/Soroban-MIP-Collections/`) — Stellar (Soroban)
+
+IP collection issuance for Stellar. `mip_registry` (permissionless, ownerless,
+zero-fee) deploys creator-owned `mip_collection` instances from an uploaded
+WASM hash (the Starknet class-hash pattern). Collections: owner-gated
+sequential minting from 1 with complete per-token URIs (token_uri overridden —
+never base-uri-composed), OZ Stellar NFT base (transfers/approvals), and the
+OZ royalties interface `royalty_info(token_id, sale_price) -> (Address, i128)`
+with a creator-set, owner-adjustable default.
+
+- **Stack**: soroban-sdk 26.1.0 + stellar-tokens 0.7.2 (OpenZeppelin Stellar) + wasm32v1-none
+- **Gotchas**: ed25519-dalek must be pinned 2.2.0 (`cargo update -p ed25519-dalek@3.0.0 --precise 2.2.0`);
+  wasm builds need `SOROBAN_SDK_BUILD_SYSTEM_SUPPORTS_SPEC_SHAKING_V2=true` (or stellar-cli ≥25.2's
+  `stellar contract build`); OZ Base handles require_auth internally (don't double-auth)
+- **Status**: built and tested; NOT deployed (deploys separately authorized)
+
+Build & test:
+
+    cd contracts/Soroban-MIP-Collections
+    SOROBAN_SDK_BUILD_SYSTEM_SUPPORTS_SPEC_SHAKING_V2=true cargo build --target wasm32v1-none --release
+    SOROBAN_SDK_BUILD_SYSTEM_SUPPORTS_SPEC_SHAKING_V2=true cargo test

@@ -21,20 +21,17 @@ pub enum DataKey {
 #[contracterror]
 #[derive(Copy, Clone, Debug, Eq, PartialEq)]
 pub enum RegistryError {
-    AlreadyInitialized = 1,
-    NotInitialized = 2,
+    NotInitialized = 1,
 }
 
 const EVT_CREATED: Symbol = symbol_short!("created");
 
 #[contractimpl]
 impl MipRegistry {
-    /// One-time setup: stores the collection contract's WASM hash the
-    /// registry deploys instances from.
-    pub fn init(e: Env, collection_wasm: BytesN<32>) {
-        if e.storage().instance().has(&DataKey::CollectionWasm) {
-            panic_with_error!(&e, RegistryError::AlreadyInitialized);
-        }
+    /// Deploy-time setup: stores the collection contract's WASM hash the
+    /// registry deploys instances from. A constructor cannot be front-run —
+    /// it runs atomically with the registry's own deployment.
+    pub fn __constructor(e: Env, collection_wasm: BytesN<32>) {
         e.storage().instance().set(&DataKey::CollectionWasm, &collection_wasm);
     }
 

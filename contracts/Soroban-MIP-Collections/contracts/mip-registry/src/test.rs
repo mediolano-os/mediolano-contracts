@@ -13,9 +13,8 @@ fn setup() -> (Env, MipRegistryClient<'static>) {
     env.mock_all_auths();
     let wasm_bytes = Bytes::from_slice(&env, COLLECTION_WASM);
     let wasm_hash: BytesN<32> = env.deployer().upload_contract_wasm(wasm_bytes);
-    let contract_id = env.register(MipRegistry, ());
+    let contract_id = env.register(MipRegistry, (wasm_hash,));
     let client = MipRegistryClient::new(&env, &contract_id);
-    client.init(&wasm_hash);
     (env, client)
 }
 
@@ -67,15 +66,6 @@ fn created_collection_is_initialized_for_creator() {
     let (receiver, amount) = c.royalty_info(&token_id, &10_000i128);
     assert_eq!(receiver, creator);
     assert_eq!(amount, 250);
-}
-
-#[test]
-#[should_panic]
-fn init_cannot_run_twice() {
-    let (env, client) = setup();
-    let wasm_bytes = Bytes::from_slice(&env, COLLECTION_WASM);
-    let wasm_hash: BytesN<32> = env.deployer().upload_contract_wasm(wasm_bytes);
-    client.init(&wasm_hash);
 }
 
 #[test]

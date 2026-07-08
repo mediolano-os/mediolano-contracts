@@ -6,6 +6,14 @@ use crate::types::{TicketCollection, TicketData};
 pub const IIP_TICKET_COLLECTION_ID: felt252 =
     0x329801ec79f9a18a441f490a55694aadd00b57e11fc1f2fc561b9bebc68e3d9;
 
+// Marks a collection whose metadata JSON carries the Mediolano programmable
+// license trait schema (License, Commercial Use, Derivatives, Attribution,
+// Territory, AI Policy, Standard, Registration). Discovery only — the license
+// remains data in metadata, not contract-enforced state.
+// Derivation: starknet_keccak("mediolano.licensed-collection.v1").
+pub const ILICENSED_COLLECTION_ID: felt252 =
+    0x3aaa3269207d0d03ca389e2a76f46c207ff513c2503ba463805d76ce52d75b8;
+
 #[starknet::interface]
 pub trait IIPTicketCollection<TContractState> {
     fn create_ticket_collection(

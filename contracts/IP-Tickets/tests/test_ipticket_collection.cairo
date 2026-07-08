@@ -1,5 +1,6 @@
 use ip_ticket::interface::{
     IIPTicketCollectionDispatcher, IIPTicketCollectionDispatcherTrait, IIP_TICKET_COLLECTION_ID,
+    ILICENSED_COLLECTION_ID,
 };
 use ip_ticket::mock::mock_erc20::{IERC20MintDispatcher, IERC20MintDispatcherTrait};
 use openzeppelin_introspection::interface::{ISRC5Dispatcher, ISRC5DispatcherTrait};
@@ -489,4 +490,11 @@ fn test_supports_ticket_collection_interface() {
 
     assert(src5.supports_interface(IIP_TICKET_COLLECTION_ID), 'interface supported');
     assert(src5.supports_interface(IERC2981_ID), 'erc2981 supported');
+}
+
+#[test]
+fn test_supports_licensed_collection_interface() {
+    let collection = deploy_ticket_collection();
+    let src5 = ISRC5Dispatcher { contract_address: collection.contract_address };
+    assert(src5.supports_interface(ILICENSED_COLLECTION_ID), 'licensed marker missing');
 }

@@ -12,7 +12,7 @@ pub mod IPTicketCollection {
         StoragePointerWriteAccess,
     };
     use starknet::{ContractAddress, get_block_timestamp, get_caller_address};
-    use crate::interface::{IIPTicketCollection, IIP_TICKET_COLLECTION_ID};
+    use crate::interface::{IIPTicketCollection, IIP_TICKET_COLLECTION_ID, ILICENSED_COLLECTION_ID};
     use crate::types::{TicketCollection as TicketCollectionData, TicketData, bytearray_starts_with};
 
     component!(path: ERC721Component, storage: erc721, event: ERC721Event);
@@ -122,6 +122,7 @@ pub mod IPTicketCollection {
         self.ownable.initializer(owner);
         self.src5.register_interface(IIP_TICKET_COLLECTION_ID);
         self.src5.register_interface(IERC2981_ID);
+        self.src5.register_interface(ILICENSED_COLLECTION_ID);
         self.next_token_id.write(1);
     }
 

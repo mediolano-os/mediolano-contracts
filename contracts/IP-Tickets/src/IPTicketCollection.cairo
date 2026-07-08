@@ -388,7 +388,7 @@ pub mod IPTicketCollection {
             self.last_collection_id.read()
         }
 
-        fn total_supply(self: @ContractState) -> u256 {
+        fn total_minted(self: @ContractState) -> u256 {
             self.total_supply.read()
         }
 

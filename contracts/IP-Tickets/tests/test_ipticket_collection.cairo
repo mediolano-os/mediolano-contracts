@@ -202,7 +202,7 @@ fn test_mint_free_ticket() {
     let token_id = ticket_collection.mint_ticket(collection_id);
 
     assert(token_id == 1, 'token id should be one');
-    assert(ticket_collection.total_supply() == 1, 'total supply should be one');
+    assert(ticket_collection.total_minted() == 1, 'total minted should be one');
     assert(ticket_collection.has_valid_ticket(receiver, collection_id), 'receiver should be valid');
     assert(
         ticket_collection.get_active_ticket_balance(receiver, collection_id) == 1, 'active balance',

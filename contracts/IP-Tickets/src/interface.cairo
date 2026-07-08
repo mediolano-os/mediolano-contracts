@@ -46,7 +46,7 @@ pub trait IIPTicketCollection<TContractState> {
 
     fn get_last_collection_id(self: @TContractState) -> u256;
 
-    fn total_supply(self: @TContractState) -> u256;
+    fn total_minted(self: @TContractState) -> u256;
 
     fn royalty_info(
         self: @TContractState, token_id: u256, sale_price: u256,

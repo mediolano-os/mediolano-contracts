@@ -28,7 +28,7 @@ pub trait IIPTicketCollection<TContractState> {
 
     fn set_collection_active(ref self: TContractState, collection_id: u256, active: bool);
 
-    fn mint_ticket(ref self: TContractState, collection_id: u256) -> u256;
+    fn mint_ticket(ref self: TContractState, collection_id: u256, recipient: ContractAddress) -> u256;
 
     fn redeem_ticket(ref self: TContractState, token_id: u256);
 
@@ -47,6 +47,8 @@ pub trait IIPTicketCollection<TContractState> {
     fn get_last_collection_id(self: @TContractState) -> u256;
 
     fn total_minted(self: @TContractState) -> u256;
+
+    fn version(self: @TContractState) -> ByteArray;
 
     fn royalty_info(
         self: @TContractState, token_id: u256, sale_price: u256,

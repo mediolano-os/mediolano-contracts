@@ -199,7 +199,7 @@ fn test_mint_free_ticket() {
 
     cheat_block_timestamp(ticket_collection.contract_address, 1_000, CheatSpan::TargetCalls(1));
     cheat_caller_address(ticket_collection.contract_address, receiver, CheatSpan::TargetCalls(1));
-    let token_id = ticket_collection.mint_ticket(collection_id);
+    let token_id = ticket_collection.mint_ticket(collection_id, receiver);
 
     assert(token_id == 1, 'token id should be one');
     assert(ticket_collection.total_minted() == 1, 'total minted should be one');
@@ -234,7 +234,7 @@ fn test_paid_ticket_transfers_tokens() {
     erc20.approve(ticket_collection.contract_address, 1000);
 
     cheat_caller_address(ticket_collection.contract_address, receiver, CheatSpan::TargetCalls(1));
-    ticket_collection.mint_ticket(collection_id);
+    ticket_collection.mint_ticket(collection_id, receiver);
 
     assert(erc20.balance_of(CREATOR()) == 1000, 'creator should be paid');
     assert(erc20.balance_of(receiver) == 2000, 'buyer should pay');
@@ -251,10 +251,10 @@ fn test_mint_ticket_rejects_over_supply() {
         .create_ticket_collection(0, 1, 10_000, 0, Option::None, IPFS_URI());
 
     cheat_caller_address(ticket_collection.contract_address, receiver, CheatSpan::TargetCalls(1));
-    ticket_collection.mint_ticket(collection_id);
+    ticket_collection.mint_ticket(collection_id, receiver);
 
     cheat_caller_address(ticket_collection.contract_address, receiver, CheatSpan::TargetCalls(1));
-    ticket_collection.mint_ticket(collection_id);
+    ticket_collection.mint_ticket(collection_id, receiver);
 }
 
 #[test]
@@ -266,7 +266,7 @@ fn test_mint_ticket_rejects_expired_collection() {
 
     cheat_block_timestamp(ticket_collection.contract_address, 10_000, CheatSpan::TargetCalls(1));
     cheat_caller_address(ticket_collection.contract_address, receiver, CheatSpan::TargetCalls(1));
-    ticket_collection.mint_ticket(collection_id);
+    ticket_collection.mint_ticket(collection_id, receiver);
 }
 
 #[test]
@@ -280,7 +280,7 @@ fn test_mint_to_non_receiver_rejected() {
         ticket_collection.contract_address,
         CheatSpan::TargetCalls(1),
     );
-    ticket_collection.mint_ticket(collection_id);
+    ticket_collection.mint_ticket(collection_id, ticket_collection.contract_address);
 }
 
 #[test]
@@ -291,7 +291,7 @@ fn test_transfer_moves_access() {
     let collection_id = create_free_collection(ticket_collection, 10_000);
 
     cheat_caller_address(ticket_collection.contract_address, receiver_1, CheatSpan::TargetCalls(1));
-    let token_id = ticket_collection.mint_ticket(collection_id);
+    let token_id = ticket_collection.mint_ticket(collection_id, receiver_1);
 
     let erc721 = IERC721Dispatcher { contract_address: ticket_collection.contract_address };
     cheat_caller_address(ticket_collection.contract_address, receiver_1, CheatSpan::TargetCalls(1));
@@ -319,7 +319,7 @@ fn test_redeem_ticket_removes_access() {
     let collection_id = create_free_collection(ticket_collection, 10_000);
 
     cheat_caller_address(ticket_collection.contract_address, receiver, CheatSpan::TargetCalls(1));
-    let token_id = ticket_collection.mint_ticket(collection_id);
+    let token_id = ticket_collection.mint_ticket(collection_id, receiver);
 
     cheat_caller_address(ticket_collection.contract_address, receiver, CheatSpan::TargetCalls(1));
     ticket_collection.redeem_ticket(token_id);
@@ -338,7 +338,7 @@ fn test_cannot_redeem_twice() {
     let collection_id = create_free_collection(ticket_collection, 10_000);
 
     cheat_caller_address(ticket_collection.contract_address, receiver, CheatSpan::TargetCalls(1));
-    let token_id = ticket_collection.mint_ticket(collection_id);
+    let token_id = ticket_collection.mint_ticket(collection_id, receiver);
 
     cheat_caller_address(ticket_collection.contract_address, receiver, CheatSpan::TargetCalls(1));
     ticket_collection.redeem_ticket(token_id);
@@ -354,7 +354,7 @@ fn test_royalty_info() {
     let collection_id = create_free_collection(ticket_collection, 10_000);
 
     cheat_caller_address(ticket_collection.contract_address, receiver, CheatSpan::TargetCalls(1));
-    let token_id = ticket_collection.mint_ticket(collection_id);
+    let token_id = ticket_collection.mint_ticket(collection_id, receiver);
 
     let (recipient, amount) = ticket_collection.royaltyInfo(token_id, 1000);
     assert(recipient == CREATOR(), 'royalty recipient');
@@ -389,7 +389,7 @@ fn test_reentrant_payment_token_reverts_atomically() {
     assert(collection_id == expected_collection_id, 'expected first collection');
 
     cheat_caller_address(ticket_collection.contract_address, USER1(), CheatSpan::TargetCalls(1));
-    ticket_collection.mint_ticket(collection_id);
+    ticket_collection.mint_ticket(collection_id, USER1());
 }
 
 #[test]
@@ -422,7 +422,7 @@ fn test_deactivation_blocks_mint() {
     ticket_collection.set_collection_active(collection_id, false);
 
     cheat_caller_address(ticket_collection.contract_address, receiver, CheatSpan::TargetCalls(1));
-    ticket_collection.mint_ticket(collection_id);
+    ticket_collection.mint_ticket(collection_id, receiver);
 }
 
 #[test]
@@ -433,7 +433,7 @@ fn test_deactivation_preserves_existing_tickets() {
     let collection_id = create_free_collection(ticket_collection, 10_000);
 
     cheat_caller_address(ticket_collection.contract_address, receiver_1, CheatSpan::TargetCalls(1));
-    let token_id = ticket_collection.mint_ticket(collection_id);
+    let token_id = ticket_collection.mint_ticket(collection_id, receiver_1);
 
     cheat_caller_address(ticket_collection.contract_address, CREATOR(), CheatSpan::TargetCalls(1));
     ticket_collection.set_collection_active(collection_id, false);
@@ -465,7 +465,7 @@ fn test_reactivation_allows_mint() {
     ticket_collection.set_collection_active(collection_id, true);
 
     cheat_caller_address(ticket_collection.contract_address, receiver, CheatSpan::TargetCalls(1));
-    ticket_collection.mint_ticket(collection_id);
+    ticket_collection.mint_ticket(collection_id, receiver);
     assert(ticket_collection.has_valid_ticket(receiver, collection_id), 'mint should work again');
 }
 
@@ -476,7 +476,7 @@ fn test_royalty_info_snake_case() {
     let collection_id = create_free_collection(ticket_collection, 10_000);
 
     cheat_caller_address(ticket_collection.contract_address, receiver, CheatSpan::TargetCalls(1));
-    let token_id = ticket_collection.mint_ticket(collection_id);
+    let token_id = ticket_collection.mint_ticket(collection_id, receiver);
 
     let (recipient, amount) = ticket_collection.royalty_info(token_id, 1000);
     assert(recipient == CREATOR(), 'royalty recipient');
@@ -497,4 +497,33 @@ fn test_supports_licensed_collection_interface() {
     let collection = deploy_ticket_collection();
     let src5 = ISRC5Dispatcher { contract_address: collection.contract_address };
     assert(src5.supports_interface(ILICENSED_COLLECTION_ID), 'licensed marker missing');
+}
+
+#[test]
+fn test_collection_version() {
+    let collection = deploy_ticket_collection();
+    assert_eq!(collection.version(), "2.0.0");
+}
+
+#[test]
+fn test_mint_ticket_to_recipient_other_than_payer() {
+    let ticket_collection = deploy_ticket_collection();
+    let payer = USER1();
+    let recipient = deploy_receiver();
+    let collection_id = create_free_collection(ticket_collection, 10_000);
+
+    cheat_block_timestamp(ticket_collection.contract_address, 1_000, CheatSpan::TargetCalls(1));
+    cheat_caller_address(ticket_collection.contract_address, payer, CheatSpan::TargetCalls(1));
+    let token_id = ticket_collection.mint_ticket(collection_id, recipient);
+
+    let erc721 = IERC721Dispatcher { contract_address: ticket_collection.contract_address };
+    assert(erc721.owner_of(token_id) == recipient, 'recipient should own ticket');
+    assert(
+        ticket_collection.get_active_ticket_balance(recipient, collection_id) == 1,
+        'recipient active balance',
+    );
+    assert(
+        ticket_collection.get_active_ticket_balance(payer, collection_id) == 0,
+        'payer holds nothing',
+    );
 }

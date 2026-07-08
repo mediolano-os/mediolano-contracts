@@ -9,13 +9,22 @@
 pub mod IPTicketCollectionFactory {
     use core::hash::{HashStateExTrait, HashStateTrait};
     use core::poseidon::PoseidonTrait;
+    use openzeppelin_introspection::src5::SRC5Component;
     use starknet::storage::{StoragePointerReadAccess, StoragePointerWriteAccess};
     use starknet::syscalls::deploy_syscall;
     use starknet::{ClassHash, ContractAddress, SyscallResultTrait, get_caller_address};
-    use crate::interface::IIPTicketCollectionFactory;
+    use crate::interface::{IIPTicketCollectionFactory, IIP_TICKET_COLLECTION_FACTORY_ID};
+
+    component!(path: SRC5Component, storage: src5, event: SRC5Event);
+
+    #[abi(embed_v0)]
+    impl SRC5Impl = SRC5Component::SRC5Impl<ContractState>;
+    impl SRC5InternalImpl = SRC5Component::InternalImpl<ContractState>;
 
     #[storage]
     struct Storage {
+        #[substorage(v0)]
+        src5: SRC5Component::Storage,
         /// Class hash used to deploy new IPTicketCollection instances.
         /// Immutable — fixed at deploy.
         ip_ticket_collection_class_hash: ClassHash,
@@ -26,6 +35,8 @@ pub mod IPTicketCollectionFactory {
     #[event]
     #[derive(Drop, starknet::Event)]
     pub enum Event {
+        #[flat]
+        SRC5Event: SRC5Component::Event,
         CollectionDeployed: CollectionDeployed,
     }
 
@@ -50,6 +61,7 @@ pub mod IPTicketCollectionFactory {
     #[constructor]
     fn constructor(ref self: ContractState, collection_class_hash: ClassHash) {
         assert(collection_class_hash.into() != 0_felt252, 'Class hash is zero');
+        self.src5.register_interface(IIP_TICKET_COLLECTION_FACTORY_ID);
         self.ip_ticket_collection_class_hash.write(collection_class_hash);
         // deploy_nonce defaults to 0 — no explicit write needed
     }
@@ -61,7 +73,7 @@ pub mod IPTicketCollectionFactory {
         }
 
         fn version(self: @ContractState) -> ByteArray {
-            "1.0.0"
+            "2.0.0"
         }
 
         fn deploy_ticket_collection(

@@ -270,15 +270,15 @@ pub mod IPTicketCollection {
                 );
         }
 
-        fn mint_ticket(ref self: ContractState, collection_id: u256) -> u256 {
+        fn mint_ticket(ref self: ContractState, collection_id: u256, recipient: ContractAddress) -> u256 {
             let mut collection = self.ticket_collections.read(collection_id);
             assert(!collection.creator.is_zero(), 'Ticket collection not found');
             assert(collection.active, 'Collection is inactive');
             assert(get_block_timestamp() < collection.expiration, 'Ticket collection expired');
             assert(collection.minted < collection.max_supply, 'Max supply reached');
+            assert(!recipient.is_zero(), 'Recipient is zero address');
 
-            let caller = get_caller_address();
-            assert(!caller.is_zero(), 'Recipient is zero address');
+            let payer = get_caller_address();
 
             collection.minted += 1;
             self.ticket_collections.write(collection_id, collection.clone());
@@ -292,14 +292,14 @@ pub mod IPTicketCollection {
             // interactions); a reentrant call from the payment token or the
             // receiver callback runs under its own caller context against
             // consistent storage.
-            collect_payment(caller, @collection);
+            collect_payment(payer, @collection);
 
-            self.erc721.safe_mint(caller, token_id, array![].span());
+            self.erc721.safe_mint(recipient, token_id, array![].span());
 
             self
                 .emit(
                     TicketMinted {
-                        token_id, collection_id, owner: caller, minted_at: get_block_timestamp(),
+                        token_id, collection_id, owner: recipient, minted_at: get_block_timestamp(),
                     },
                 );
 
@@ -390,6 +390,10 @@ pub mod IPTicketCollection {
 
         fn total_minted(self: @ContractState) -> u256 {
             self.total_supply.read()
+        }
+
+        fn version(self: @ContractState) -> ByteArray {
+            "2.0.0"
         }
 
         fn royalty_info(

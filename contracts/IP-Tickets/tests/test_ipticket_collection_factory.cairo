@@ -2,7 +2,9 @@ use ip_ticket::IPTicketCollectionFactory::IPTicketCollectionFactory::{Collection
 use ip_ticket::interface::{
     IIPTicketCollectionDispatcher, IIPTicketCollectionDispatcherTrait,
     IIPTicketCollectionFactoryDispatcher, IIPTicketCollectionFactoryDispatcherTrait,
+    IIP_TICKET_COLLECTION_FACTORY_ID,
 };
+use openzeppelin_introspection::interface::{ISRC5Dispatcher, ISRC5DispatcherTrait};
 use openzeppelin_access::ownable::interface::{IOwnableDispatcher, IOwnableDispatcherTrait};
 use openzeppelin_token::erc721::interface::{
     IERC721MetadataDispatcher, IERC721MetadataDispatcherTrait,
@@ -59,7 +61,7 @@ fn test_factory_constructor_class_hash() {
 #[test]
 fn test_factory_version() {
     let (factory, _) = deploy_factory();
-    assert_eq!(factory.version(), "1.0.0");
+    assert_eq!(factory.version(), "2.0.0");
 }
 
 #[test]
@@ -204,4 +206,11 @@ fn test_any_address_can_deploy_ticket_collection() {
     assert!(addr1.into() != 0_felt252);
     assert!(addr2.into() != 0_felt252);
     assert!(addr1 != addr2);
+}
+
+#[test]
+fn test_factory_registers_src5_discovery_id() {
+    let (_, factory_address) = deploy_factory();
+    let src5 = ISRC5Dispatcher { contract_address: factory_address };
+    assert(src5.supports_interface(IIP_TICKET_COLLECTION_FACTORY_ID), 'factory id missing');
 }

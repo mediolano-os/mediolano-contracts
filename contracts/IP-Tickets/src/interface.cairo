@@ -28,7 +28,9 @@ pub trait IIPTicketCollection<TContractState> {
 
     fn set_collection_active(ref self: TContractState, collection_id: u256, active: bool);
 
-    fn mint_ticket(ref self: TContractState, collection_id: u256, recipient: ContractAddress) -> u256;
+    fn mint_ticket(
+        ref self: TContractState, collection_id: u256, recipient: ContractAddress,
+    ) -> u256;
 
     fn redeem_ticket(ref self: TContractState, token_id: u256);
 

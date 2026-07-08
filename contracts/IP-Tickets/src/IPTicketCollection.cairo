@@ -270,7 +270,9 @@ pub mod IPTicketCollection {
                 );
         }
 
-        fn mint_ticket(ref self: ContractState, collection_id: u256, recipient: ContractAddress) -> u256 {
+        fn mint_ticket(
+            ref self: ContractState, collection_id: u256, recipient: ContractAddress,
+        ) -> u256 {
             let mut collection = self.ticket_collections.read(collection_id);
             assert(!collection.creator.is_zero(), 'Ticket collection not found');
             assert(collection.active, 'Collection is inactive');

@@ -68,9 +68,12 @@ pub mod IPClub {
             max_members: Option<u32>,
             entry_fee: Option<u256>,
             payment_token: Option<ContractAddress>,
+            transfer_lock: Option<u64>,
+            royalty_bps: u256,
         ) -> u256 {
             assert(name.len() > 0, 'Name must not be empty');
             assert(symbol.len() > 0, 'Symbol must not be empty');
+            assert(royalty_bps <= 10000, 'Royalty exceeds 10000');
             let valid_uri = bytearray_starts_with(@metadata_uri, @"ipfs://")
                 || bytearray_starts_with(@metadata_uri, @"ar://");
             assert(valid_uri, 'URI must be ipfs:// or ar://');
@@ -111,6 +114,8 @@ pub mod IPClub {
                 creator,
                 ip_club_manager,
                 metadata_uri.clone(),
+                transfer_lock,
+                royalty_bps,
             )
                 .serialize(ref constructor_calldata);
 
@@ -127,6 +132,8 @@ pub mod IPClub {
                 max_members,
                 entry_fee,
                 payment_token,
+                transfer_lock,
+                royalty_bps,
             };
 
             self.clubs.entry(next_club_id).write(club_record);
@@ -236,6 +243,10 @@ pub mod IPClub {
 
         fn get_last_club_id(self: @ContractState) -> u256 {
             self.last_club_id.read()
+        }
+
+        fn version(self: @ContractState) -> ByteArray {
+            "2.0.0"
         }
     }
 }

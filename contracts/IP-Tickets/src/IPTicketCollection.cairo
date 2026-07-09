@@ -12,7 +12,7 @@ pub mod IPTicketCollection {
         StoragePointerWriteAccess,
     };
     use starknet::{ContractAddress, get_block_timestamp, get_caller_address};
-    use crate::interface::{IIPTicketCollection, IIP_TICKET_COLLECTION_ID};
+    use crate::interface::{IIPTicketCollection, IIP_TICKET_COLLECTION_ID, ILICENSED_COLLECTION_ID};
     use crate::types::{TicketCollection as TicketCollectionData, TicketData, bytearray_starts_with};
 
     component!(path: ERC721Component, storage: erc721, event: ERC721Event);
@@ -42,7 +42,7 @@ pub mod IPTicketCollection {
         ownable: OwnableComponent::Storage,
         last_collection_id: u256,
         next_token_id: u256,
-        total_supply: u256,
+        total_minted: u256,
         ticket_collections: Map<u256, TicketCollectionData>,
         token_to_collection: Map<u256, u256>,
         active_ticket_balance: Map<(ContractAddress, u256), u256>,
@@ -95,6 +95,8 @@ pub mod IPTicketCollection {
         pub collection_id: u256,
         #[key]
         pub owner: ContractAddress,
+        // Who paid for the mint — differs from owner on gift/agent mints.
+        pub payer: ContractAddress,
         pub minted_at: u64,
     }
 
@@ -122,6 +124,7 @@ pub mod IPTicketCollection {
         self.ownable.initializer(owner);
         self.src5.register_interface(IIP_TICKET_COLLECTION_ID);
         self.src5.register_interface(IERC2981_ID);
+        self.src5.register_interface(ILICENSED_COLLECTION_ID);
         self.next_token_id.write(1);
     }
 
@@ -269,15 +272,17 @@ pub mod IPTicketCollection {
                 );
         }
 
-        fn mint_ticket(ref self: ContractState, collection_id: u256) -> u256 {
+        fn mint_ticket(
+            ref self: ContractState, collection_id: u256, recipient: ContractAddress,
+        ) -> u256 {
             let mut collection = self.ticket_collections.read(collection_id);
             assert(!collection.creator.is_zero(), 'Ticket collection not found');
             assert(collection.active, 'Collection is inactive');
             assert(get_block_timestamp() < collection.expiration, 'Ticket collection expired');
             assert(collection.minted < collection.max_supply, 'Max supply reached');
+            assert(!recipient.is_zero(), 'Recipient is zero address');
 
-            let caller = get_caller_address();
-            assert(!caller.is_zero(), 'Recipient is zero address');
+            let payer = get_caller_address();
 
             collection.minted += 1;
             self.ticket_collections.write(collection_id, collection.clone());
@@ -285,20 +290,24 @@ pub mod IPTicketCollection {
             let token_id = self.next_token_id.read();
             self.next_token_id.write(token_id + 1);
             self.token_to_collection.write(token_id, collection_id);
-            self.total_supply.write(self.total_supply.read() + 1);
+            self.total_minted.write(self.total_minted.read() + 1);
 
             // State is final before the external calls (checks-effects-
             // interactions); a reentrant call from the payment token or the
             // receiver callback runs under its own caller context against
             // consistent storage.
-            collect_payment(caller, @collection);
+            collect_payment(payer, @collection);
 
-            self.erc721.safe_mint(caller, token_id, array![].span());
+            self.erc721.safe_mint(recipient, token_id, array![].span());
 
             self
                 .emit(
                     TicketMinted {
-                        token_id, collection_id, owner: caller, minted_at: get_block_timestamp(),
+                        token_id,
+                        collection_id,
+                        owner: recipient,
+                        payer,
+                        minted_at: get_block_timestamp(),
                     },
                 );
 
@@ -387,8 +396,12 @@ pub mod IPTicketCollection {
             self.last_collection_id.read()
         }
 
-        fn total_supply(self: @ContractState) -> u256 {
-            self.total_supply.read()
+        fn total_minted(self: @ContractState) -> u256 {
+            self.total_minted.read()
+        }
+
+        fn version(self: @ContractState) -> ByteArray {
+            "2.0.0"
         }
 
         fn royalty_info(

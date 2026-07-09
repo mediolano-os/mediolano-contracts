@@ -9,8 +9,8 @@ pub const ATTESTATION_LEGAL_PROOF: felt252 = 'LEGAL_PROOF';
 pub const ATTESTATION_VERIFICATION: felt252 = 'VERIFICATION';
 pub const ATTESTATION_CONFIRM: felt252 = 'CONFIRM';
 pub const ATTESTATION_DISPUTE: felt252 = 'DISPUTE';
-// Reserved seam: "this state/work was anchored on chain X at height N"
-// (Bitcoin proof-of-existence, roadmap Horizon). No contract logic reads it.
+// Claims "this work/state was anchored on chain X at height N"
+// (proof-of-existence). No contract logic reads it.
 pub const ATTESTATION_ANCHOR: felt252 = 'ANCHOR';
 
 #[derive(Drop, Serde, starknet::Store, Clone)]

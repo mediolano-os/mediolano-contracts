@@ -377,3 +377,109 @@ fn test_relation_requires_type() {
     cheat_caller_address(ip_identity.contract_address, creator(), CheatSpan::TargetCalls(1));
     ip_identity.relate(ip_id, other, 0);
 }
+
+#[test]
+fn test_anyone_can_add_append_only_attestation() {
+    let ip_identity = deploy_ip_identity();
+    let ip_id = register_default_work(ip_identity);
+
+    cheat_caller_address(ip_identity.contract_address, collaborator(), CheatSpan::TargetCalls(1));
+    start_cheat_block_timestamp(ip_identity.contract_address, 3000);
+    let attestation_id = ip_identity
+        .attest(ip_id, 0, 'PROVENANCE', 'provenance_hash', "ipfs://provenance-proof");
+    stop_cheat_block_timestamp(ip_identity.contract_address);
+
+    let work = ip_identity.get_work(ip_id);
+    let attestation = ip_identity.get_attestation(ip_id, attestation_id);
+    assert(attestation_id == 1, 'wrong attestation id');
+    assert(work.attestation_count == 1, 'wrong attestation count');
+    assert(attestation.attester == collaborator(), 'wrong attester');
+    assert(attestation.subject_key == 0, 'wrong subject');
+    assert(attestation.attestation_type == 'PROVENANCE', 'wrong type');
+    assert(attestation.data_hash == 'provenance_hash', 'wrong data hash');
+    assert(attestation.uri == "ipfs://provenance-proof", 'wrong uri');
+    assert(attestation.created_at == 3000, 'wrong attestation timestamp');
+}
+
+#[test]
+#[should_panic(expected: ('IPID: invalid attestation',))]
+fn test_attestation_requires_type_and_hash() {
+    let ip_identity = deploy_ip_identity();
+    let ip_id = register_default_work(ip_identity);
+
+    cheat_caller_address(ip_identity.contract_address, collaborator(), CheatSpan::TargetCalls(1));
+    ip_identity.attest(ip_id, 0, 0, 'provenance_hash', "ipfs://provenance-proof");
+}
+
+#[test]
+fn test_dispute_targets_a_representation_claim() {
+    let ip_identity = deploy_ip_identity();
+    let ip_id = register_default_work(ip_identity);
+
+    cheat_caller_address(ip_identity.contract_address, creator(), CheatSpan::TargetCalls(1));
+    ip_identity
+        .link_representation(
+            ip_id,
+            'bitcoin',
+            0,
+            0,
+            'inscription_hash',
+            "ipfs://ordinal-proof",
+            'ordinal_metadata_hash',
+            'ORDINAL',
+        );
+    let ordinal_key = ip_identity
+        .derive_representation_key('bitcoin', 0, 0, 'inscription_hash', 'ORDINAL');
+
+    cheat_caller_address(ip_identity.contract_address, collaborator(), CheatSpan::TargetCalls(1));
+    let attestation_id = ip_identity
+        .attest(ip_id, ordinal_key, 'DISPUTE', 'holder_sig_hash', "ipfs://dispute-proof");
+
+    let attestation = ip_identity.get_attestation(ip_id, attestation_id);
+    assert(attestation.subject_key == ordinal_key, 'wrong subject key');
+    assert(attestation.attestation_type == 'DISPUTE', 'wrong type');
+}
+
+#[test]
+fn test_confirm_targets_a_relation_claim() {
+    let ip_identity = deploy_ip_identity();
+    let ip_id = register_default_work(ip_identity);
+
+    cheat_caller_address(ip_identity.contract_address, collaborator(), CheatSpan::TargetCalls(1));
+    let parent = ip_identity.register_work("ipfs://parent", 'parent_hash', 0);
+
+    cheat_caller_address(ip_identity.contract_address, creator(), CheatSpan::TargetCalls(1));
+    let relation_key = ip_identity.relate(ip_id, parent, 'DERIVATIVE');
+
+    cheat_caller_address(ip_identity.contract_address, collaborator(), CheatSpan::TargetCalls(1));
+    let attestation_id = ip_identity
+        .attest(ip_id, relation_key, 'CONFIRM', 'consent_hash', "ipfs://confirm-proof");
+
+    let attestation = ip_identity.get_attestation(ip_id, attestation_id);
+    assert(attestation.subject_key == relation_key, 'wrong subject key');
+}
+
+#[test]
+#[should_panic(expected: ('IPID: invalid subject',))]
+fn test_attestation_rejects_unknown_subject() {
+    let ip_identity = deploy_ip_identity();
+    let ip_id = register_default_work(ip_identity);
+
+    cheat_caller_address(ip_identity.contract_address, collaborator(), CheatSpan::TargetCalls(1));
+    ip_identity.attest(ip_id, 'bogus_subject', 'CONFIRM', 'hash', "ipfs://proof");
+}
+
+#[test]
+#[should_panic(expected: ('IPID: invalid subject',))]
+fn test_attestation_rejects_other_works_subject() {
+    let ip_identity = deploy_ip_identity();
+    let ip_id = register_default_work(ip_identity);
+
+    cheat_caller_address(ip_identity.contract_address, collaborator(), CheatSpan::TargetCalls(2));
+    let other = ip_identity.register_work("ipfs://other", 'other_hash', 0);
+    ip_identity.link_representation(other, 'starknet', 0x999, 5, 0, "ipfs://t", 'h', 'ERC721');
+    let foreign_key = ip_identity.derive_representation_key('starknet', 0x999, 5, 0, 'ERC721');
+
+    cheat_caller_address(ip_identity.contract_address, collaborator(), CheatSpan::TargetCalls(1));
+    ip_identity.attest(ip_id, foreign_key, 'CONFIRM', 'hash', "ipfs://proof");
+}

@@ -7,6 +7,8 @@ pub const ATTESTATION_CREATOR_SIGNATURE: felt252 = 'CREATOR_SIGNATURE';
 pub const ATTESTATION_EXTERNAL_REGISTRY: felt252 = 'EXTERNAL_REGISTRY';
 pub const ATTESTATION_LEGAL_PROOF: felt252 = 'LEGAL_PROOF';
 pub const ATTESTATION_VERIFICATION: felt252 = 'VERIFICATION';
+pub const ATTESTATION_CONFIRM: felt252 = 'CONFIRM';
+pub const ATTESTATION_DISPUTE: felt252 = 'DISPUTE';
 
 #[derive(Drop, Serde, starknet::Store, Clone)]
 pub struct Work {
@@ -50,6 +52,7 @@ pub struct Relation {
 pub struct Attestation {
     pub ip_id: felt252,
     pub attestation_id: u256,
+    pub subject_key: felt252,
     pub attester: ContractAddress,
     pub attestation_type: felt252,
     pub data_hash: felt252,
@@ -82,6 +85,7 @@ pub trait IIPIdentity<TContractState> {
     fn attest(
         ref self: TContractState,
         ip_id: felt252,
+        subject_key: felt252,
         attestation_type: felt252,
         data_hash: felt252,
         uri: ByteArray,
@@ -142,6 +146,7 @@ pub mod IPIdentity {
     const ERROR_INVALID_RELATION: felt252 = 'IPID: invalid relation';
     const ERROR_RELATION_ASSERTED: felt252 = 'IPID: relation asserted';
     const ERROR_SELF_RELATION: felt252 = 'IPID: self relation';
+    const ERROR_INVALID_SUBJECT: felt252 = 'IPID: invalid subject';
 
     #[storage]
     struct Storage {
@@ -221,6 +226,7 @@ pub mod IPIdentity {
         #[key]
         pub ip_id: felt252,
         pub attestation_id: u256,
+        pub subject_key: felt252,
         pub attester: ContractAddress,
         pub attestation_type: felt252,
         pub data_hash: felt252,
@@ -411,6 +417,7 @@ pub mod IPIdentity {
         fn attest(
             ref self: ContractState,
             ip_id: felt252,
+            subject_key: felt252,
             attestation_type: felt252,
             data_hash: felt252,
             uri: ByteArray,
@@ -420,12 +427,25 @@ pub mod IPIdentity {
             assert(attestation_type != 0, ERROR_INVALID_ATTESTATION);
             assert(data_hash != 0, ERROR_INVALID_ATTESTATION);
 
+            if subject_key != 0 {
+                let subject_owner = if self
+                    .representation_to_ip_id
+                    .read(subject_key)
+                    .is_non_zero() {
+                    self.representation_to_ip_id.read(subject_key)
+                } else {
+                    self.relation_to_ip_id.read(subject_key)
+                };
+                assert(subject_owner == ip_id, ERROR_INVALID_SUBJECT);
+            }
+
             let attester = get_caller_address();
             let attestation_id = work.attestation_count + 1;
             let timestamp = get_block_timestamp();
             let attestation = Attestation {
                 ip_id,
                 attestation_id,
+                subject_key,
                 attester,
                 attestation_type,
                 data_hash,
@@ -444,6 +464,7 @@ pub mod IPIdentity {
                     WorkAttested {
                         ip_id,
                         attestation_id,
+                        subject_key,
                         attester,
                         attestation_type,
                         data_hash,

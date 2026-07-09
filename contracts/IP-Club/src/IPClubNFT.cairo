@@ -6,12 +6,11 @@ pub mod IPClubNFT {
     use openzeppelin_token::common::erc2981::interface::IERC2981_ID;
     use openzeppelin_token::erc721::ERC721Component;
     use openzeppelin_token::erc721::interface::{IERC721Metadata, IERC721MetadataCamelOnly};
-    use starknet::get_block_timestamp;
     use starknet::storage::{
         Map, StorageMapReadAccess, StorageMapWriteAccess, StoragePointerReadAccess,
         StoragePointerWriteAccess,
     };
-    use starknet::{ContractAddress, get_caller_address};
+    use starknet::{ContractAddress, get_block_timestamp, get_caller_address};
 
     component!(path: ERC721Component, storage: erc721, event: ERC721Event);
     component!(path: SRC5Component, storage: src5, event: SRC5Event);

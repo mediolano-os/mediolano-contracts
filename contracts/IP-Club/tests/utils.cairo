@@ -61,6 +61,8 @@ pub fn deploy_ip_club_nft(
     creator: ContractAddress,
     ip_club_manager: ContractAddress,
     metadata_uri: ByteArray,
+    transfer_lock: Option<u64>,
+    royalty_bps: u256,
 ) -> IIPClubNFTDispatcher {
     let mut calldata = array![];
     calldata.append_serde(name);
@@ -69,6 +71,8 @@ pub fn deploy_ip_club_nft(
     calldata.append_serde(creator);
     calldata.append_serde(ip_club_manager);
     calldata.append_serde(metadata_uri);
+    calldata.append_serde(transfer_lock);
+    calldata.append_serde(royalty_bps);
     let ip_club_nft = declare_and_deploy("IPClubNFT", calldata);
     IIPClubNFTDispatcher { contract_address: ip_club_nft }
 }

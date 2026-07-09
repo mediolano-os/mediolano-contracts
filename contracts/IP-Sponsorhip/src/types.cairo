@@ -15,19 +15,29 @@ pub struct SponsorshipOffer {
     pub transferable: bool,
     pub specific_sponsor: Option<ContractAddress>,
     pub open: bool,
+    /// EIP-2981 royalty carried onto the issued license, basis points.
+    pub royalty_bps: u256,
 }
 
-// A license exists iff `author != 0` and is valid while `expires_at >= now`.
-// Once issued it cannot be revoked by anyone; it simply runs to expiry.
+/// The on-chain facts of an issued sponsorship license. Stored per-token on
+/// IPSponsorshipLicense; the current holder is the token's ERC-721 owner.
+/// The human/machine-readable terms live in the content-addressed
+/// license_terms_uri metadata (the token's URI).
 #[derive(Drop, Serde, starknet::Store, Clone)]
-pub struct License {
+pub struct LicenseData {
+    /// The IP author who issued the license (royalty recipient on resale).
     pub author: ContractAddress,
-    pub sponsor: ContractAddress,
-    pub nft_contract: ContractAddress,
-    pub token_id: u256,
-    pub amount_paid: u256,
+    /// The licensed IP asset.
+    pub asset_contract: ContractAddress,
+    pub asset_token_id: u256,
+    /// License validity end (unix seconds). Expiry is contract-enforced:
+    /// an expired license cannot transfer and reads as invalid.
     pub expires_at: u64,
+    /// Whether the holder may transfer the license (set from the offer).
     pub transferable: bool,
+    /// EIP-2981 royalty to the author on license resale, basis points.
+    pub royalty_bps: u256,
+    /// Content-addressed license terms (ipfs:// or ar://) — the token URI.
     pub license_terms_uri: ByteArray,
 }
 

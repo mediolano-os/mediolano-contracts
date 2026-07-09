@@ -16,6 +16,7 @@ pub struct Work {
     pub metadata_hash: felt252,
     pub created_at: u64,
     pub representation_count: u256,
+    pub relation_count: u256,
     pub attestation_count: u256,
     pub exists: bool,
 }
@@ -33,6 +34,16 @@ pub struct Representation {
     pub standard: felt252,
     pub linked_at: u64,
     pub linked_by: ContractAddress,
+}
+
+#[derive(Drop, Serde, starknet::Store, Clone)]
+pub struct Relation {
+    pub ip_id: felt252,
+    pub relation_key: felt252,
+    pub related_ip_id: felt252,
+    pub relation_type: felt252,
+    pub asserted_at: u64,
+    pub asserted_by: ContractAddress,
 }
 
 #[derive(Drop, Serde, starknet::Store, Clone)]
@@ -76,7 +87,18 @@ pub trait IIPIdentity<TContractState> {
         uri: ByteArray,
     ) -> u256;
 
+    fn relate(
+        ref self: TContractState, ip_id: felt252, related_ip_id: felt252, relation_type: felt252,
+    ) -> felt252;
+
     fn get_work(self: @TContractState, ip_id: felt252) -> Work;
+    fn get_relation(self: @TContractState, relation_key: felt252) -> Relation;
+    fn get_relation_ip_id(self: @TContractState, relation_key: felt252) -> felt252;
+    fn get_work_relation_key(self: @TContractState, ip_id: felt252, index: u256) -> felt252;
+    fn is_relation_asserted(self: @TContractState, relation_key: felt252) -> bool;
+    fn derive_relation_key(
+        self: @TContractState, ip_id: felt252, related_ip_id: felt252, relation_type: felt252,
+    ) -> felt252;
     fn get_representation(self: @TContractState, representation_key: felt252) -> Representation;
     fn get_attestation(self: @TContractState, ip_id: felt252, attestation_id: u256) -> Attestation;
     fn get_representation_ip_id(self: @TContractState, representation_key: felt252) -> felt252;
@@ -107,7 +129,7 @@ pub mod IPIdentity {
         StoragePointerWriteAccess,
     };
     use starknet::{ContractAddress, get_block_timestamp, get_caller_address};
-    use super::{Attestation, IIPIdentity, Representation, Work};
+    use super::{Attestation, IIPIdentity, Relation, Representation, Work};
 
     const ERROR_INVALID_WORK: felt252 = 'IPID: invalid work';
     const ERROR_NOT_CONTROLLER: felt252 = 'IPID: not controller';
@@ -117,6 +139,9 @@ pub mod IPIdentity {
     const ERROR_INVALID_CONTROLLER: felt252 = 'IPID: invalid controller';
     const ERROR_INVALID_ATTESTATION: felt252 = 'IPID: invalid attestation';
     const ERROR_INVALID_METADATA: felt252 = 'IPID: invalid metadata';
+    const ERROR_INVALID_RELATION: felt252 = 'IPID: invalid relation';
+    const ERROR_RELATION_ASSERTED: felt252 = 'IPID: relation asserted';
+    const ERROR_SELF_RELATION: felt252 = 'IPID: self relation';
 
     #[storage]
     struct Storage {
@@ -125,6 +150,9 @@ pub mod IPIdentity {
         representation_to_ip_id: Map<felt252, felt252>,
         representations: Map<felt252, Representation>,
         work_representations: Map<(felt252, u256), felt252>,
+        relation_to_ip_id: Map<felt252, felt252>,
+        relations: Map<felt252, Relation>,
+        work_relations: Map<(felt252, u256), felt252>,
         attestations: Map<(felt252, u256), Attestation>,
     }
 
@@ -133,6 +161,7 @@ pub mod IPIdentity {
     enum Event {
         WorkRegistered: WorkRegistered,
         RepresentationLinked: RepresentationLinked,
+        RelationAsserted: RelationAsserted,
         ControllerTransferred: ControllerTransferred,
         WorkAttested: WorkAttested,
     }
@@ -163,6 +192,18 @@ pub mod IPIdentity {
         pub metadata_hash: felt252,
         pub standard: felt252,
         pub linked_by: ContractAddress,
+        pub timestamp: u64,
+    }
+
+    #[derive(Drop, starknet::Event)]
+    pub struct RelationAsserted {
+        #[key]
+        pub ip_id: felt252,
+        #[key]
+        pub relation_key: felt252,
+        pub related_ip_id: felt252,
+        pub relation_type: felt252,
+        pub asserted_by: ContractAddress,
         pub timestamp: u64,
     }
 
@@ -206,6 +247,7 @@ pub mod IPIdentity {
                 metadata_hash,
                 created_at: timestamp,
                 representation_count: 0,
+                relation_count: 0,
                 attestation_count: 0,
                 exists: true,
             };
@@ -293,6 +335,52 @@ pub mod IPIdentity {
                         timestamp,
                     },
                 );
+        }
+
+        fn relate(
+            ref self: ContractState, ip_id: felt252, related_ip_id: felt252, relation_type: felt252,
+        ) -> felt252 {
+            let mut work = self.works.read(ip_id);
+            assert(work.exists, ERROR_INVALID_WORK);
+
+            let caller = get_caller_address();
+            assert(caller == work.controller, ERROR_NOT_CONTROLLER);
+            assert(relation_type != 0, ERROR_INVALID_RELATION);
+            assert(ip_id != related_ip_id, ERROR_SELF_RELATION);
+            assert(self.works.read(related_ip_id).exists, ERROR_INVALID_WORK);
+
+            let relation_key = self.derive_relation_key(ip_id, related_ip_id, relation_type);
+            assert(self.relation_to_ip_id.read(relation_key).is_zero(), ERROR_RELATION_ASSERTED);
+
+            let timestamp = get_block_timestamp();
+            let relation = Relation {
+                ip_id,
+                relation_key,
+                related_ip_id,
+                relation_type,
+                asserted_at: timestamp,
+                asserted_by: caller,
+            };
+
+            self.relation_to_ip_id.write(relation_key, ip_id);
+            self.relations.write(relation_key, relation);
+            self.work_relations.write((ip_id, work.relation_count), relation_key);
+            work.relation_count += 1;
+            self.works.write(ip_id, work);
+
+            self
+                .emit(
+                    RelationAsserted {
+                        ip_id,
+                        relation_key,
+                        related_ip_id,
+                        relation_type,
+                        asserted_by: caller,
+                        timestamp,
+                    },
+                );
+
+            relation_key
         }
 
         fn transfer_controller(
@@ -391,6 +479,37 @@ pub mod IPIdentity {
                 ERROR_INVALID_ATTESTATION,
             );
             self.attestations.read((ip_id, attestation_id))
+        }
+
+        fn get_relation(self: @ContractState, relation_key: felt252) -> Relation {
+            assert(self.relation_to_ip_id.read(relation_key).is_non_zero(), ERROR_INVALID_RELATION);
+            self.relations.read(relation_key)
+        }
+
+        fn get_relation_ip_id(self: @ContractState, relation_key: felt252) -> felt252 {
+            self.relation_to_ip_id.read(relation_key)
+        }
+
+        fn get_work_relation_key(self: @ContractState, ip_id: felt252, index: u256) -> felt252 {
+            let work = self.works.read(ip_id);
+            assert(work.exists, ERROR_INVALID_WORK);
+            assert(index < work.relation_count, ERROR_INVALID_RELATION);
+            self.work_relations.read((ip_id, index))
+        }
+
+        fn is_relation_asserted(self: @ContractState, relation_key: felt252) -> bool {
+            self.relation_to_ip_id.read(relation_key).is_non_zero()
+        }
+
+        fn derive_relation_key(
+            self: @ContractState, ip_id: felt252, related_ip_id: felt252, relation_type: felt252,
+        ) -> felt252 {
+            PoseidonTrait::new()
+                .update_with('IPID_RELATION_V1')
+                .update_with(ip_id)
+                .update_with(related_ip_id)
+                .update_with(relation_type)
+                .finalize()
         }
 
         fn get_representation_ip_id(self: @ContractState, representation_key: felt252) -> felt252 {

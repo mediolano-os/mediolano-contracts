@@ -290,3 +290,90 @@ fn test_controller_transfer_rejects_zero_address() {
     cheat_caller_address(ip_identity.contract_address, creator(), CheatSpan::TargetCalls(1));
     ip_identity.transfer_controller(ip_id, zero_address());
 }
+
+#[test]
+fn test_relations_support_multiple_parents() {
+    let ip_identity = deploy_ip_identity();
+
+    cheat_caller_address(ip_identity.contract_address, creator(), CheatSpan::TargetCalls(2));
+    let parent_a = ip_identity.register_work("ipfs://parent-a", 'parent_a_hash', 0);
+    let parent_b = ip_identity.register_work("ipfs://parent-b", 'parent_b_hash', 0);
+
+    cheat_caller_address(ip_identity.contract_address, collaborator(), CheatSpan::TargetCalls(3));
+    let remix = ip_identity.register_work("ipfs://remix", 'remix_hash', 0);
+    start_cheat_block_timestamp(ip_identity.contract_address, 4000);
+    let key_a = ip_identity.relate(remix, parent_a, 'DERIVATIVE');
+    stop_cheat_block_timestamp(ip_identity.contract_address);
+    let key_b = ip_identity.relate(remix, parent_b, 'DERIVATIVE');
+
+    let work = ip_identity.get_work(remix);
+    let relation = ip_identity.get_relation(key_a);
+    assert(work.relation_count == 2, 'wrong relation count');
+    assert(key_a == ip_identity.derive_relation_key(remix, parent_a, 'DERIVATIVE'), 'wrong key');
+    assert(ip_identity.get_work_relation_key(remix, 0) == key_a, 'wrong first key');
+    assert(ip_identity.get_work_relation_key(remix, 1) == key_b, 'wrong second key');
+    assert(ip_identity.get_relation_ip_id(key_a) == remix, 'wrong reverse link');
+    assert(relation.related_ip_id == parent_a, 'wrong related work');
+    assert(relation.relation_type == 'DERIVATIVE', 'wrong relation type');
+    assert(relation.asserted_by == collaborator(), 'wrong asserter');
+    assert(relation.asserted_at == 4000, 'wrong asserted timestamp');
+    assert(ip_identity.is_relation_asserted(key_a), 'relation not asserted');
+}
+
+#[test]
+#[should_panic(expected: ('IPID: not controller',))]
+fn test_only_controller_asserts_relations() {
+    let ip_identity = deploy_ip_identity();
+    let ip_id = register_default_work(ip_identity);
+
+    cheat_caller_address(ip_identity.contract_address, collaborator(), CheatSpan::TargetCalls(2));
+    let other = ip_identity.register_work("ipfs://other", 'other_hash', 0);
+    ip_identity.relate(ip_id, other, 'VERSION');
+}
+
+#[test]
+#[should_panic(expected: ('IPID: invalid work',))]
+fn test_relation_requires_existing_related_work() {
+    let ip_identity = deploy_ip_identity();
+    let ip_id = register_default_work(ip_identity);
+
+    cheat_caller_address(ip_identity.contract_address, creator(), CheatSpan::TargetCalls(1));
+    ip_identity.relate(ip_id, 'missing_work_id', 'VERSION');
+}
+
+#[test]
+#[should_panic(expected: ('IPID: self relation',))]
+fn test_relation_rejects_self_reference() {
+    let ip_identity = deploy_ip_identity();
+    let ip_id = register_default_work(ip_identity);
+
+    cheat_caller_address(ip_identity.contract_address, creator(), CheatSpan::TargetCalls(1));
+    ip_identity.relate(ip_id, ip_id, 'VERSION');
+}
+
+#[test]
+#[should_panic(expected: ('IPID: relation asserted',))]
+fn test_duplicate_relation_reverts() {
+    let ip_identity = deploy_ip_identity();
+    let ip_id = register_default_work(ip_identity);
+
+    cheat_caller_address(ip_identity.contract_address, collaborator(), CheatSpan::TargetCalls(1));
+    let other = ip_identity.register_work("ipfs://other", 'other_hash', 0);
+
+    cheat_caller_address(ip_identity.contract_address, creator(), CheatSpan::TargetCalls(2));
+    ip_identity.relate(ip_id, other, 'VERSION');
+    ip_identity.relate(ip_id, other, 'VERSION');
+}
+
+#[test]
+#[should_panic(expected: ('IPID: invalid relation',))]
+fn test_relation_requires_type() {
+    let ip_identity = deploy_ip_identity();
+    let ip_id = register_default_work(ip_identity);
+
+    cheat_caller_address(ip_identity.contract_address, collaborator(), CheatSpan::TargetCalls(1));
+    let other = ip_identity.register_work("ipfs://other", 'other_hash', 0);
+
+    cheat_caller_address(ip_identity.contract_address, creator(), CheatSpan::TargetCalls(1));
+    ip_identity.relate(ip_id, other, 0);
+}

@@ -13,6 +13,12 @@ pub struct ClubRecord {
     pub max_members: Option<u32>,
     pub entry_fee: Option<u256>,
     pub payment_token: Option<ContractAddress>,
+    /// Seconds from a card's mint until it becomes transferable.
+    /// None = permanently non-transferable. Immutable per club.
+    pub transfer_lock: Option<u64>,
+    /// EIP-2981 royalty on secondary sales of vested cards, in basis
+    /// points (0..=10000). Recipient is the club creator. Immutable.
+    pub royalty_bps: u256,
 }
 
 pub fn bytearray_starts_with(haystack: @ByteArray, needle: @ByteArray) -> bool {

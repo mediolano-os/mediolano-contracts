@@ -483,3 +483,69 @@ fn test_attestation_rejects_other_works_subject() {
     cheat_caller_address(ip_identity.contract_address, collaborator(), CheatSpan::TargetCalls(1));
     ip_identity.attest(ip_id, foreign_key, 'CONFIRM', 'hash', "ipfs://proof");
 }
+
+#[test]
+fn test_sealed_registration_then_reveal() {
+    let ip_identity = deploy_ip_identity();
+
+    cheat_caller_address(ip_identity.contract_address, creator(), CheatSpan::TargetCalls(1));
+    start_cheat_block_timestamp(ip_identity.contract_address, 5000);
+    let ip_id = ip_identity.register_work("", 'sealed_hash', 0);
+    stop_cheat_block_timestamp(ip_identity.contract_address);
+
+    let sealed = ip_identity.get_work(ip_id);
+    assert(sealed.metadata_uri == "", 'should be sealed');
+    assert(sealed.metadata_hash == 'sealed_hash', 'commitment missing');
+    assert(sealed.created_at == 5000, 'wrong existence timestamp');
+
+    cheat_caller_address(ip_identity.contract_address, creator(), CheatSpan::TargetCalls(1));
+    ip_identity.reveal(ip_id, "ipfs://revealed-manuscript");
+
+    let revealed = ip_identity.get_work(ip_id);
+    assert(revealed.metadata_uri == "ipfs://revealed-manuscript", 'reveal did not stick');
+    assert(revealed.metadata_hash == 'sealed_hash', 'commitment changed');
+    assert(revealed.created_at == 5000, 'timestamp changed');
+}
+
+#[test]
+#[should_panic(expected: ('IPID: already revealed',))]
+fn test_reveal_is_one_time() {
+    let ip_identity = deploy_ip_identity();
+
+    cheat_caller_address(ip_identity.contract_address, creator(), CheatSpan::TargetCalls(3));
+    let ip_id = ip_identity.register_work("", 'sealed_hash', 0);
+    ip_identity.reveal(ip_id, "ipfs://first-reveal");
+    ip_identity.reveal(ip_id, "ipfs://second-reveal");
+}
+
+#[test]
+#[should_panic(expected: ('IPID: already revealed',))]
+fn test_reveal_rejects_unsealed_work() {
+    let ip_identity = deploy_ip_identity();
+    let ip_id = register_default_work(ip_identity);
+
+    cheat_caller_address(ip_identity.contract_address, creator(), CheatSpan::TargetCalls(1));
+    ip_identity.reveal(ip_id, "ipfs://overwrite-attempt");
+}
+
+#[test]
+#[should_panic(expected: ('IPID: not controller',))]
+fn test_only_controller_reveals() {
+    let ip_identity = deploy_ip_identity();
+
+    cheat_caller_address(ip_identity.contract_address, creator(), CheatSpan::TargetCalls(1));
+    let ip_id = ip_identity.register_work("", 'sealed_hash', 0);
+
+    cheat_caller_address(ip_identity.contract_address, collaborator(), CheatSpan::TargetCalls(1));
+    ip_identity.reveal(ip_id, "ipfs://not-yours");
+}
+
+#[test]
+#[should_panic(expected: ('IPID: invalid metadata',))]
+fn test_reveal_requires_nonempty_uri() {
+    let ip_identity = deploy_ip_identity();
+
+    cheat_caller_address(ip_identity.contract_address, creator(), CheatSpan::TargetCalls(2));
+    let ip_id = ip_identity.register_work("", 'sealed_hash', 0);
+    ip_identity.reveal(ip_id, "");
+}

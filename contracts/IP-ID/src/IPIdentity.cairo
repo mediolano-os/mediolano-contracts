@@ -66,6 +66,8 @@ pub trait IIPIdentity<TContractState> {
         ref self: TContractState, metadata_uri: ByteArray, metadata_hash: felt252, salt: felt252,
     ) -> felt252;
 
+    fn reveal(ref self: TContractState, ip_id: felt252, metadata_uri: ByteArray);
+
     fn link_representation(
         ref self: TContractState,
         ip_id: felt252,
@@ -147,6 +149,7 @@ pub mod IPIdentity {
     const ERROR_RELATION_ASSERTED: felt252 = 'IPID: relation asserted';
     const ERROR_SELF_RELATION: felt252 = 'IPID: self relation';
     const ERROR_INVALID_SUBJECT: felt252 = 'IPID: invalid subject';
+    const ERROR_ALREADY_REVEALED: felt252 = 'IPID: already revealed';
 
     #[storage]
     struct Storage {
@@ -165,6 +168,7 @@ pub mod IPIdentity {
     #[derive(Drop, starknet::Event)]
     enum Event {
         WorkRegistered: WorkRegistered,
+        WorkRevealed: WorkRevealed,
         RepresentationLinked: RepresentationLinked,
         RelationAsserted: RelationAsserted,
         ControllerTransferred: ControllerTransferred,
@@ -180,6 +184,14 @@ pub mod IPIdentity {
         pub controller: ContractAddress,
         pub metadata_hash: felt252,
         pub salt: felt252,
+        pub metadata_uri: ByteArray,
+        pub timestamp: u64,
+    }
+
+    #[derive(Drop, starknet::Event)]
+    pub struct WorkRevealed {
+        #[key]
+        pub ip_id: felt252,
         pub metadata_uri: ByteArray,
         pub timestamp: u64,
     }
@@ -275,6 +287,21 @@ pub mod IPIdentity {
                 );
 
             ip_id
+        }
+
+        fn reveal(ref self: ContractState, ip_id: felt252, metadata_uri: ByteArray) {
+            let mut work = self.works.read(ip_id);
+            assert(work.exists, ERROR_INVALID_WORK);
+
+            let caller = get_caller_address();
+            assert(caller == work.controller, ERROR_NOT_CONTROLLER);
+            assert(work.metadata_uri.len() == 0, ERROR_ALREADY_REVEALED);
+            assert(metadata_uri.len() != 0, ERROR_INVALID_METADATA);
+
+            work.metadata_uri = metadata_uri.clone();
+            self.works.write(ip_id, work);
+
+            self.emit(WorkRevealed { ip_id, metadata_uri, timestamp: get_block_timestamp() });
         }
 
         fn link_representation(

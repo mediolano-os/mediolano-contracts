@@ -158,10 +158,6 @@ pub mod IPClubNFT {
             assert(get_caller_address() == self.ip_club_manager.read(), 'Not club manager');
             assert(!recipient.is_zero(), 'Recipient is zero address');
 
-            // Ensure recipient does not already own an NFT
-            let has_nft = self.has_nft(recipient);
-            assert(!has_nft, 'Already has nft');
-
             // Increment token ID and mint NFT
             let next_token_id = self.last_token_id.read() + 1;
             self.minted_at.write(next_token_id, get_block_timestamp());

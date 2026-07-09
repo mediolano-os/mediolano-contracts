@@ -363,8 +363,7 @@ fn test_join_club_reentrant_payment_token_reverts_atomically() {
 }
 
 #[test]
-#[should_panic(expected: 'Already has nft')]
-fn test_cannot_join_club_twice() {
+fn test_join_club_twice_holds_two_cards() {
     let TestContracts { ip_club, .. } = initialize_contracts();
     let member = deploy_receiver();
 
@@ -379,6 +378,12 @@ fn test_cannot_join_club_twice() {
 
     cheat_caller_address(ip_club.contract_address, member, CheatSpan::TargetCalls(1));
     ip_club.join_club(club_id);
+
+    let club_record = ip_club.get_club_record(club_id);
+    let erc721 = IERC721Dispatcher { contract_address: club_record.club_nft };
+    assert!(erc721.balance_of(member) == 2, "member holds two cards");
+    assert!(club_record.num_members == 2, "two cards outstanding");
+    assert!(ip_club.is_member(club_id, member), "still a member");
 }
 
 #[test]

@@ -146,6 +146,8 @@ pub mod IPClub {
                         creator,
                         club_nft: ip_club_nft_address,
                         metadata_uri,
+                        transfer_lock,
+                        royalty_bps,
                         timestamp: get_block_timestamp(),
                     },
                 );

@@ -1,3 +1,5 @@
+use ip_club::IPClub::IPClub::Event;
+use ip_club::events::NewClubCreated;
 use ip_club::interfaces::IIPClub::{IIPClubDispatcherTrait, IIP_CLUB_ID};
 use ip_club::interfaces::IIPClubNFT::{
     IIPClubNFTDispatcher, IIPClubNFTDispatcherTrait, IIP_CLUB_NFT_ID, ILICENSED_COLLECTION_ID,
@@ -9,7 +11,9 @@ use openzeppelin_token::erc721::interface::{
     IERC721Dispatcher, IERC721DispatcherTrait, IERC721MetadataDispatcher,
     IERC721MetadataDispatcherTrait,
 };
-use snforge_std::{CheatSpan, cheat_block_timestamp, cheat_caller_address};
+use snforge_std::{
+    CheatSpan, EventSpyAssertionsTrait, cheat_block_timestamp, cheat_caller_address, spy_events,
+};
 use crate::utils::*;
 
 fn IPFS_URI() -> ByteArray {
@@ -875,4 +879,44 @@ fn test_version_views() {
 
     assert!(ip_club.version() == "2.0.0", "registry version");
     assert!(ip_club_nft.version() == "2.0.0", "nft version");
+}
+
+#[test]
+fn test_new_club_created_event_carries_vesting_and_royalty_terms() {
+    let TestContracts { ip_club, .. } = initialize_contracts();
+
+    cheat_caller_address(ip_club.contract_address, CREATOR(), CheatSpan::TargetCalls(1));
+    let mut spy = spy_events();
+    let club_id = ip_club
+        .create_club(
+            "Vipers",
+            "VPs",
+            IPFS_URI(),
+            Option::None,
+            Option::None,
+            Option::None,
+            Option::Some(1000),
+            500,
+        );
+
+    let club_record = ip_club.get_club_record(club_id);
+    spy
+        .assert_emitted(
+            @array![
+                (
+                    ip_club.contract_address,
+                    Event::NewClubCreated(
+                        NewClubCreated {
+                            club_id,
+                            creator: CREATOR(),
+                            club_nft: club_record.club_nft,
+                            metadata_uri: IPFS_URI(),
+                            transfer_lock: Option::Some(1000),
+                            royalty_bps: 500,
+                            timestamp: 0,
+                        },
+                    ),
+                ),
+            ],
+        );
 }

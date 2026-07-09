@@ -1,3 +1,4 @@
+use ip_ticket::IPTicketCollection::IPTicketCollection::{Event, TicketMinted};
 use ip_ticket::interface::{
     IIPTicketCollectionDispatcher, IIPTicketCollectionDispatcherTrait, IIP_TICKET_COLLECTION_ID,
     ILICENSED_COLLECTION_ID,
@@ -12,8 +13,8 @@ use openzeppelin_token::erc721::interface::{
 };
 use openzeppelin_utils::serde::SerializedAppend;
 use snforge_std::{
-    CheatSpan, ContractClassTrait, DeclareResultTrait, cheat_block_timestamp, cheat_caller_address,
-    declare,
+    CheatSpan, ContractClassTrait, DeclareResultTrait, EventSpyAssertionsTrait,
+    cheat_block_timestamp, cheat_caller_address, declare, spy_events,
 };
 use starknet::ContractAddress;
 
@@ -514,6 +515,7 @@ fn test_mint_ticket_to_recipient_other_than_payer() {
 
     cheat_block_timestamp(ticket_collection.contract_address, 1_000, CheatSpan::TargetCalls(1));
     cheat_caller_address(ticket_collection.contract_address, payer, CheatSpan::TargetCalls(1));
+    let mut spy = spy_events();
     let token_id = ticket_collection.mint_ticket(collection_id, recipient);
 
     let erc721 = IERC721Dispatcher { contract_address: ticket_collection.contract_address };
@@ -526,4 +528,18 @@ fn test_mint_ticket_to_recipient_other_than_payer() {
         ticket_collection.get_active_ticket_balance(payer, collection_id) == 0,
         'payer holds nothing',
     );
+
+    spy
+        .assert_emitted(
+            @array![
+                (
+                    ticket_collection.contract_address,
+                    Event::TicketMinted(
+                        TicketMinted {
+                            token_id, collection_id, owner: recipient, payer, minted_at: 1_000,
+                        },
+                    ),
+                ),
+            ],
+        );
 }

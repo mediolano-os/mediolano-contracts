@@ -42,7 +42,7 @@ pub mod IPTicketCollection {
         ownable: OwnableComponent::Storage,
         last_collection_id: u256,
         next_token_id: u256,
-        total_supply: u256,
+        total_minted: u256,
         ticket_collections: Map<u256, TicketCollectionData>,
         token_to_collection: Map<u256, u256>,
         active_ticket_balance: Map<(ContractAddress, u256), u256>,
@@ -95,6 +95,8 @@ pub mod IPTicketCollection {
         pub collection_id: u256,
         #[key]
         pub owner: ContractAddress,
+        // Who paid for the mint — differs from owner on gift/agent mints.
+        pub payer: ContractAddress,
         pub minted_at: u64,
     }
 
@@ -288,7 +290,7 @@ pub mod IPTicketCollection {
             let token_id = self.next_token_id.read();
             self.next_token_id.write(token_id + 1);
             self.token_to_collection.write(token_id, collection_id);
-            self.total_supply.write(self.total_supply.read() + 1);
+            self.total_minted.write(self.total_minted.read() + 1);
 
             // State is final before the external calls (checks-effects-
             // interactions); a reentrant call from the payment token or the
@@ -301,7 +303,11 @@ pub mod IPTicketCollection {
             self
                 .emit(
                     TicketMinted {
-                        token_id, collection_id, owner: recipient, minted_at: get_block_timestamp(),
+                        token_id,
+                        collection_id,
+                        owner: recipient,
+                        payer,
+                        minted_at: get_block_timestamp(),
                     },
                 );
 
@@ -391,7 +397,7 @@ pub mod IPTicketCollection {
         }
 
         fn total_minted(self: @ContractState) -> u256 {
-            self.total_supply.read()
+            self.total_minted.read()
         }
 
         fn version(self: @ContractState) -> ByteArray {

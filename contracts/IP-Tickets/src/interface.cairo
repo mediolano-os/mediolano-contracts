@@ -1,10 +1,13 @@
 use starknet::{ClassHash, ContractAddress};
 use crate::types::{TicketCollection, TicketData};
 
-// Protocol discovery ID registered via SRC5.
-// Derivation: starknet_keccak("mediolano.ip-ticket-collection.v1").
+// Protocol discovery ID registered via SRC5. Bumped to .v2 with the
+// breaking ABI change (mint_ticket recipient param, total_supply →
+// total_minted): immutable v1 deployments keep registering the .v1 ID,
+// so consumers can tell the two ABIs apart via SRC5 alone.
+// Derivation: starknet_keccak("mediolano.ip-ticket-collection.v2").
 pub const IIP_TICKET_COLLECTION_ID: felt252 =
-    0x329801ec79f9a18a441f490a55694aadd00b57e11fc1f2fc561b9bebc68e3d9;
+    0x1ef1511f39449df0a0c686da9bc0759e7c75ad8eb0da68c53ac14093a6ea757;
 
 // Marks a collection whose metadata JSON carries the Mediolano programmable
 // license trait schema (License, Commercial Use, Derivatives, Attribution,

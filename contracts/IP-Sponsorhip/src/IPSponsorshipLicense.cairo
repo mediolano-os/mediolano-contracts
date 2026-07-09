@@ -71,6 +71,8 @@ pub mod IPSponsorshipLicense {
         pub asset_token_id: u256,
         pub expires_at: u64,
         pub transferable: bool,
+        pub royalty_bps: u256,
+        pub license_terms_uri: ByteArray,
         pub minted_at: u64,
     }
 
@@ -175,6 +177,8 @@ pub mod IPSponsorshipLicense {
                         asset_token_id: data.asset_token_id,
                         expires_at: data.expires_at,
                         transferable: data.transferable,
+                        royalty_bps: data.royalty_bps,
+                        license_terms_uri: data.license_terms_uri,
                         minted_at: get_block_timestamp(),
                     },
                 );

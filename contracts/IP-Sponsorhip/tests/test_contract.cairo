@@ -1,3 +1,4 @@
+use ip_sponsorship::IPSponsorshipLicense::IPSponsorshipLicense::{Event, LicenseMinted};
 use ip_sponsorship::interface::{
     IIPSponsorshipDispatcher, IIPSponsorshipDispatcherTrait, IIPSponsorshipLicenseDispatcher,
     IIPSponsorshipLicenseDispatcherTrait, IIP_SPONSORSHIP_ID, IIP_SPONSORSHIP_LICENSE_ID,
@@ -11,8 +12,8 @@ use openzeppelin_token::erc20::interface::{IERC20Dispatcher, IERC20DispatcherTra
 use openzeppelin_token::erc721::interface::{IERC721Dispatcher, IERC721DispatcherTrait, IERC721_ID};
 use openzeppelin_utils::serde::SerializedAppend;
 use snforge_std::{
-    CheatSpan, ContractClassTrait, DeclareResultTrait, cheat_block_timestamp, cheat_caller_address,
-    declare,
+    CheatSpan, ContractClassTrait, DeclareResultTrait, EventSpyAssertionsTrait,
+    cheat_block_timestamp, cheat_caller_address, declare, spy_events,
 };
 use starknet::ContractAddress;
 
@@ -669,4 +670,49 @@ fn test_version_views() {
     let (sponsorship, license_nft) = deploy_sponsorship_pair();
     assert(sponsorship.version() == "2.0.0", 'sponsorship version');
     assert(license_nft.version() == "2.0.0", 'license version');
+}
+
+#[test]
+fn test_license_minted_event_carries_royalty_and_terms() {
+    let (sponsorship, license_nft) = deploy_sponsorship_pair();
+    let token = deploy_erc20();
+    let nft = deploy_ip_nft_for(AUTHOR());
+
+    cheat_caller_address(sponsorship.contract_address, AUTHOR(), CheatSpan::TargetCalls(1));
+    let offer_id = sponsorship
+        .create_offer(
+            nft, IP_TOKEN, 100, DAY, token.contract_address, TERMS_URI(), true, 500, Option::None,
+        );
+
+    cheat_caller_address(sponsorship.contract_address, SPONSOR1(), CheatSpan::TargetCalls(1));
+    sponsorship.place_bid(offer_id, 250);
+    fund_and_approve(token, SPONSOR1(), sponsorship.contract_address, 250);
+
+    cheat_block_timestamp(sponsorship.contract_address, 1000, CheatSpan::TargetCalls(1));
+    cheat_caller_address(sponsorship.contract_address, AUTHOR(), CheatSpan::TargetCalls(1));
+    let mut spy = spy_events();
+    let license_id = sponsorship.accept_bid(offer_id, SPONSOR1());
+
+    spy
+        .assert_emitted(
+            @array![
+                (
+                    license_nft.contract_address,
+                    Event::LicenseMinted(
+                        LicenseMinted {
+                            token_id: license_id,
+                            recipient: SPONSOR1(),
+                            author: AUTHOR(),
+                            asset_contract: nft,
+                            asset_token_id: IP_TOKEN,
+                            expires_at: 1000 + DAY,
+                            transferable: true,
+                            royalty_bps: 500,
+                            license_terms_uri: TERMS_URI(),
+                            minted_at: 0,
+                        },
+                    ),
+                ),
+            ],
+        );
 }

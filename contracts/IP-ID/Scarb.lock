@@ -3,7 +3,7 @@ version = 1
 
 [[package]]
 name = "ip_id"
-version = "0.2.0"
+version = "0.3.0"
 dependencies = [
  "snforge_std",
 ]

@@ -14,8 +14,6 @@ pub struct Work {
     pub creator: ContractAddress,
     pub metadata_uri: ByteArray,
     pub metadata_hash: felt252,
-    pub parent_ip_id: u256,
-    pub parent_relation: felt252,
     pub created_at: u64,
     pub representation_count: u256,
     pub attestation_count: u256,
@@ -24,7 +22,7 @@ pub struct Work {
 
 #[derive(Drop, Serde, starknet::Store, Clone)]
 pub struct Representation {
-    pub ip_id: u256,
+    pub ip_id: felt252,
     pub chain_id: felt252,
     pub representation_key: felt252,
     pub asset_locator: felt252,
@@ -39,7 +37,7 @@ pub struct Representation {
 
 #[derive(Drop, Serde, starknet::Store, Clone)]
 pub struct Attestation {
-    pub ip_id: u256,
+    pub ip_id: felt252,
     pub attestation_id: u256,
     pub attester: ContractAddress,
     pub attestation_type: felt252,
@@ -51,16 +49,12 @@ pub struct Attestation {
 #[starknet::interface]
 pub trait IIPIdentity<TContractState> {
     fn register_work(
-        ref self: TContractState,
-        metadata_uri: ByteArray,
-        metadata_hash: felt252,
-        parent_ip_id: u256,
-        parent_relation: felt252,
-    ) -> u256;
+        ref self: TContractState, metadata_uri: ByteArray, metadata_hash: felt252, salt: felt252,
+    ) -> felt252;
 
     fn link_representation(
         ref self: TContractState,
-        ip_id: u256,
+        ip_id: felt252,
         chain_id: felt252,
         asset_locator: felt252,
         token_id: u256,
@@ -70,24 +64,29 @@ pub trait IIPIdentity<TContractState> {
         standard: felt252,
     );
 
-    fn transfer_controller(ref self: TContractState, ip_id: u256, new_controller: ContractAddress);
+    fn transfer_controller(
+        ref self: TContractState, ip_id: felt252, new_controller: ContractAddress,
+    );
 
     fn attest(
         ref self: TContractState,
-        ip_id: u256,
+        ip_id: felt252,
         attestation_type: felt252,
         data_hash: felt252,
         uri: ByteArray,
     ) -> u256;
 
-    fn get_work(self: @TContractState, ip_id: u256) -> Work;
+    fn get_work(self: @TContractState, ip_id: felt252) -> Work;
     fn get_representation(self: @TContractState, representation_key: felt252) -> Representation;
-    fn get_attestation(self: @TContractState, ip_id: u256, attestation_id: u256) -> Attestation;
-    fn get_representation_ip_id(self: @TContractState, representation_key: felt252) -> u256;
-    fn get_work_representation_key(self: @TContractState, ip_id: u256, index: u256) -> felt252;
-    fn is_work_registered(self: @TContractState, ip_id: u256) -> bool;
+    fn get_attestation(self: @TContractState, ip_id: felt252, attestation_id: u256) -> Attestation;
+    fn get_representation_ip_id(self: @TContractState, representation_key: felt252) -> felt252;
+    fn get_work_representation_key(self: @TContractState, ip_id: felt252, index: u256) -> felt252;
+    fn is_work_registered(self: @TContractState, ip_id: felt252) -> bool;
     fn is_representation_linked(self: @TContractState, representation_key: felt252) -> bool;
-    fn get_total_works(self: @TContractState) -> u256;
+    fn registered_count(self: @TContractState) -> u256;
+    fn derive_ip_id(
+        self: @TContractState, creator: ContractAddress, metadata_hash: felt252, salt: felt252,
+    ) -> felt252;
     fn derive_representation_key(
         self: @TContractState,
         chain_id: felt252,
@@ -112,7 +111,7 @@ pub mod IPIdentity {
 
     const ERROR_INVALID_WORK: felt252 = 'IPID: invalid work';
     const ERROR_NOT_CONTROLLER: felt252 = 'IPID: not controller';
-    const ERROR_INVALID_PARENT: felt252 = 'IPID: invalid parent';
+    const ERROR_ALREADY_REGISTERED: felt252 = 'IPID: already registered';
     const ERROR_REPRESENTATION_LINKED: felt252 = 'IPID: representation linked';
     const ERROR_INVALID_REPRESENTATION: felt252 = 'IPID: invalid representation';
     const ERROR_INVALID_CONTROLLER: felt252 = 'IPID: invalid controller';
@@ -121,12 +120,12 @@ pub mod IPIdentity {
 
     #[storage]
     struct Storage {
-        next_ip_id: u256,
-        works: Map<u256, Work>,
-        representation_to_ip_id: Map<felt252, u256>,
+        registered_count: u256,
+        works: Map<felt252, Work>,
+        representation_to_ip_id: Map<felt252, felt252>,
         representations: Map<felt252, Representation>,
-        work_representations: Map<(u256, u256), felt252>,
-        attestations: Map<(u256, u256), Attestation>,
+        work_representations: Map<(felt252, u256), felt252>,
+        attestations: Map<(felt252, u256), Attestation>,
     }
 
     #[event]
@@ -141,13 +140,12 @@ pub mod IPIdentity {
     #[derive(Drop, starknet::Event)]
     pub struct WorkRegistered {
         #[key]
-        pub ip_id: u256,
+        pub ip_id: felt252,
         #[key]
         pub creator: ContractAddress,
         pub controller: ContractAddress,
         pub metadata_hash: felt252,
-        pub parent_ip_id: u256,
-        pub parent_relation: felt252,
+        pub salt: felt252,
         pub metadata_uri: ByteArray,
         pub timestamp: u64,
     }
@@ -155,7 +153,7 @@ pub mod IPIdentity {
     #[derive(Drop, starknet::Event)]
     pub struct RepresentationLinked {
         #[key]
-        pub ip_id: u256,
+        pub ip_id: felt252,
         #[key]
         pub representation_key: felt252,
         pub chain_id: felt252,
@@ -171,7 +169,7 @@ pub mod IPIdentity {
     #[derive(Drop, starknet::Event)]
     pub struct ControllerTransferred {
         #[key]
-        pub ip_id: u256,
+        pub ip_id: felt252,
         pub previous_controller: ContractAddress,
         pub new_controller: ContractAddress,
         pub timestamp: u64,
@@ -180,7 +178,7 @@ pub mod IPIdentity {
     #[derive(Drop, starknet::Event)]
     pub struct WorkAttested {
         #[key]
-        pub ip_id: u256,
+        pub ip_id: felt252,
         pub attestation_id: u256,
         pub attester: ContractAddress,
         pub attestation_type: felt252,
@@ -192,33 +190,20 @@ pub mod IPIdentity {
     #[abi(embed_v0)]
     impl IPIdentityImpl of IIPIdentity<ContractState> {
         fn register_work(
-            ref self: ContractState,
-            metadata_uri: ByteArray,
-            metadata_hash: felt252,
-            parent_ip_id: u256,
-            parent_relation: felt252,
-        ) -> u256 {
+            ref self: ContractState, metadata_uri: ByteArray, metadata_hash: felt252, salt: felt252,
+        ) -> felt252 {
             assert(metadata_hash != 0, ERROR_INVALID_METADATA);
 
-            if parent_ip_id.is_non_zero() {
-                assert(self.works.read(parent_ip_id).exists, ERROR_INVALID_PARENT);
-                assert(parent_relation != 0, ERROR_INVALID_PARENT);
-            } else {
-                assert(parent_relation == 0, ERROR_INVALID_PARENT);
-            }
-
             let creator = get_caller_address();
-            let timestamp = get_block_timestamp();
-            let ip_id = self.next_ip_id.read() + 1;
-            self.next_ip_id.write(ip_id);
+            let ip_id = self.derive_ip_id(creator, metadata_hash, salt);
+            assert(!self.works.read(ip_id).exists, ERROR_ALREADY_REGISTERED);
 
+            let timestamp = get_block_timestamp();
             let work = Work {
                 controller: creator,
                 creator,
                 metadata_uri: metadata_uri.clone(),
                 metadata_hash,
-                parent_ip_id,
-                parent_relation,
                 created_at: timestamp,
                 representation_count: 0,
                 attestation_count: 0,
@@ -226,6 +211,7 @@ pub mod IPIdentity {
             };
 
             self.works.write(ip_id, work);
+            self.registered_count.write(self.registered_count.read() + 1);
 
             self
                 .emit(
@@ -234,8 +220,7 @@ pub mod IPIdentity {
                         creator,
                         controller: creator,
                         metadata_hash,
-                        parent_ip_id,
-                        parent_relation,
+                        salt,
                         metadata_uri,
                         timestamp,
                     },
@@ -246,7 +231,7 @@ pub mod IPIdentity {
 
         fn link_representation(
             ref self: ContractState,
-            ip_id: u256,
+            ip_id: felt252,
             chain_id: felt252,
             asset_locator: felt252,
             token_id: u256,
@@ -311,7 +296,7 @@ pub mod IPIdentity {
         }
 
         fn transfer_controller(
-            ref self: ContractState, ip_id: u256, new_controller: ContractAddress,
+            ref self: ContractState, ip_id: felt252, new_controller: ContractAddress,
         ) {
             let mut work = self.works.read(ip_id);
             assert(work.exists, ERROR_INVALID_WORK);
@@ -337,7 +322,7 @@ pub mod IPIdentity {
 
         fn attest(
             ref self: ContractState,
-            ip_id: u256,
+            ip_id: felt252,
             attestation_type: felt252,
             data_hash: felt252,
             uri: ByteArray,
@@ -382,7 +367,7 @@ pub mod IPIdentity {
             attestation_id
         }
 
-        fn get_work(self: @ContractState, ip_id: u256) -> Work {
+        fn get_work(self: @ContractState, ip_id: felt252) -> Work {
             let work = self.works.read(ip_id);
             assert(work.exists, ERROR_INVALID_WORK);
             work
@@ -397,7 +382,7 @@ pub mod IPIdentity {
         }
 
         fn get_attestation(
-            self: @ContractState, ip_id: u256, attestation_id: u256,
+            self: @ContractState, ip_id: felt252, attestation_id: u256,
         ) -> Attestation {
             let work = self.works.read(ip_id);
             assert(work.exists, ERROR_INVALID_WORK);
@@ -408,18 +393,20 @@ pub mod IPIdentity {
             self.attestations.read((ip_id, attestation_id))
         }
 
-        fn get_representation_ip_id(self: @ContractState, representation_key: felt252) -> u256 {
+        fn get_representation_ip_id(self: @ContractState, representation_key: felt252) -> felt252 {
             self.representation_to_ip_id.read(representation_key)
         }
 
-        fn get_work_representation_key(self: @ContractState, ip_id: u256, index: u256) -> felt252 {
+        fn get_work_representation_key(
+            self: @ContractState, ip_id: felt252, index: u256,
+        ) -> felt252 {
             let work = self.works.read(ip_id);
             assert(work.exists, ERROR_INVALID_WORK);
             assert(index < work.representation_count, ERROR_INVALID_REPRESENTATION);
             self.work_representations.read((ip_id, index))
         }
 
-        fn is_work_registered(self: @ContractState, ip_id: u256) -> bool {
+        fn is_work_registered(self: @ContractState, ip_id: felt252) -> bool {
             self.works.read(ip_id).exists
         }
 
@@ -427,8 +414,19 @@ pub mod IPIdentity {
             self.representation_to_ip_id.read(representation_key).is_non_zero()
         }
 
-        fn get_total_works(self: @ContractState) -> u256 {
-            self.next_ip_id.read()
+        fn registered_count(self: @ContractState) -> u256 {
+            self.registered_count.read()
+        }
+
+        fn derive_ip_id(
+            self: @ContractState, creator: ContractAddress, metadata_hash: felt252, salt: felt252,
+        ) -> felt252 {
+            PoseidonTrait::new()
+                .update_with('IPID_WORK_V1')
+                .update_with(creator)
+                .update_with(metadata_hash)
+                .update_with(salt)
+                .finalize()
         }
 
         fn derive_representation_key(

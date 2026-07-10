@@ -1,545 +1,355 @@
-use ip_ticket::IPTicketCollection::IPTicketCollection::{Event, TicketMinted};
-use ip_ticket::interface::{
-    IIPTicketCollectionDispatcher, IIPTicketCollectionDispatcherTrait, IIP_TICKET_COLLECTION_ID,
-    ILICENSED_COLLECTION_ID,
-};
-use ip_ticket::mock::mock_erc20::{IERC20MintDispatcher, IERC20MintDispatcherTrait};
+use ip_ticket::interface::{IIPTicketCollectionDispatcher, IIPTicketCollectionDispatcherTrait};
+use openzeppelin_utils::serde::SerializedAppend;
 use openzeppelin_introspection::interface::{ISRC5Dispatcher, ISRC5DispatcherTrait};
 use openzeppelin_token::common::erc2981::interface::IERC2981_ID;
-use openzeppelin_token::erc20::interface::{IERC20Dispatcher, IERC20DispatcherTrait};
-use openzeppelin_token::erc721::interface::{
-    IERC721Dispatcher, IERC721DispatcherTrait, IERC721MetadataDispatcher,
-    IERC721MetadataDispatcherTrait,
-};
-use openzeppelin_utils::serde::SerializedAppend;
+use openzeppelin_token::erc1155::interface::{IERC1155Dispatcher, IERC1155DispatcherTrait};
 use snforge_std::{
-    CheatSpan, ContractClassTrait, DeclareResultTrait, EventSpyAssertionsTrait,
-    cheat_block_timestamp, cheat_caller_address, declare, spy_events,
+    ContractClassTrait, DeclareResultTrait, declare, start_cheat_block_timestamp,
+    start_cheat_caller_address, stop_cheat_caller_address,
 };
 use starknet::ContractAddress;
 
-fn CREATOR() -> ContractAddress {
-    0x101.try_into().unwrap()
+fn OTHER() -> ContractAddress {
+    0x333.try_into().unwrap()
 }
 
-fn USER1() -> ContractAddress {
-    0x102.try_into().unwrap()
+fn deploy_mock_account() -> ContractAddress {
+    let class = declare("MockAccount").unwrap().contract_class();
+    let (addr, _) = class.deploy(@array![]).unwrap();
+    addr
 }
 
-fn ZERO() -> ContractAddress {
-    0.try_into().unwrap()
+fn deploy_collection() -> ContractAddress {
+    let owner = deploy_mock_account();
+    deploy_collection_with_owner(owner)
 }
 
-fn IPFS_URI() -> ByteArray {
-    "ipfs://bafybeiticket"
+fn deploy_collection_with_owner(owner: ContractAddress) -> ContractAddress {
+    let class = declare("IPTicketCollection").unwrap().contract_class();
+    let mut cd: Array<felt252> = array![];
+    let name: ByteArray = "IP Tickets Test";
+    let symbol: ByteArray = "TICK";
+    cd.append_serde(name);
+    cd.append_serde(symbol);
+    cd.append_serde(owner);
+    let (addr, _) = class.deploy(@cd).unwrap();
+    addr
 }
 
-fn AR_URI() -> ByteArray {
-    "ar://ticket-collection"
-}
+// ──────────────── create_event ─────────────────────────────────────────────
 
-fn HTTP_URI() -> ByteArray {
-    "https://example.com/ticket.json"
-}
-
-fn declare_and_deploy(contract_name: ByteArray, calldata: Array<felt252>) -> ContractAddress {
-    let contract = declare(contract_name).unwrap().contract_class();
-    let (contract_address, _) = contract.deploy(@calldata).unwrap();
-    contract_address
-}
-
-fn deploy_ticket_collection() -> IIPTicketCollectionDispatcher {
-    let mut calldata = array![];
-    let name: ByteArray = "IP Tickets";
-    let symbol: ByteArray = "IPT";
-    calldata.append_serde(name);
-    calldata.append_serde(symbol);
-    calldata.append_serde(CREATOR());
-    let address = declare_and_deploy("IPTicketCollection", calldata);
-    IIPTicketCollectionDispatcher { contract_address: address }
-}
-
-fn deploy_erc20() -> IERC20Dispatcher {
-    let mut calldata = array![];
-    let name: ByteArray = "Mock Token";
-    let symbol: ByteArray = "MOCK";
-    let supply: u256 = 0;
-    calldata.append_serde(name);
-    calldata.append_serde(symbol);
-    calldata.append_serde(supply);
-    let address = declare_and_deploy("MockERC20", calldata);
-    IERC20Dispatcher { contract_address: address }
-}
-
-fn mint_erc20(token: ContractAddress, recipient: ContractAddress, amount: u256) {
-    IERC20MintDispatcher { contract_address: token }.mint(recipient, amount);
-}
-
-fn deploy_receiver() -> ContractAddress {
-    declare_and_deploy("Receiver", array![])
-}
-
-fn deploy_reentrant_payment_token(
-    ticket_collection: ContractAddress, collection_id: u256,
-) -> ContractAddress {
-    let mut calldata = array![];
-    calldata.append_serde(ticket_collection);
-    calldata.append_serde(collection_id);
-    declare_and_deploy("ReentrantPaymentToken", calldata)
-}
-
-fn create_free_collection(
-    ticket_collection: IIPTicketCollectionDispatcher, expiration: u64,
-) -> u256 {
-    cheat_caller_address(ticket_collection.contract_address, CREATOR(), CheatSpan::TargetCalls(1));
-    ticket_collection.create_ticket_collection(0, 10, expiration, 500, Option::None, IPFS_URI())
+#[test]
+fn test_create_event_assigns_token_id() {
+    let owner = deploy_mock_account();
+    let addr = deploy_collection_with_owner(owner);
+    let ticket = IIPTicketCollectionDispatcher { contract_address: addr };
+    start_cheat_caller_address(addr, owner);
+    let id = ticket.create_event(100_u256, Option::None, Option::None, 500_u16, "ipfs://QmTest1");
+    stop_cheat_caller_address(addr);
+    assert(id == 1_u256, 'first event id should be 1');
 }
 
 #[test]
-fn test_create_ticket_collection() {
-    let ticket_collection = deploy_ticket_collection();
-
-    let collection_id = create_free_collection(ticket_collection, 10_000);
-
-    assert(collection_id == 1, 'collection id should be 1');
-    assert(ticket_collection.get_last_collection_id() == 1, 'last collection id');
-
-    let collection = ticket_collection.get_ticket_collection(collection_id);
-    assert(collection.creator == CREATOR(), 'creator should match');
-    assert(collection.max_supply == 10, 'max supply should match');
-    assert(collection.royalty_bps == 500, 'royalty should match');
-    assert(collection.metadata_uri == IPFS_URI(), 'metadata should match');
+fn test_second_event_increments_id() {
+    let owner = deploy_mock_account();
+    let addr = deploy_collection_with_owner(owner);
+    let ticket = IIPTicketCollectionDispatcher { contract_address: addr };
+    start_cheat_caller_address(addr, owner);
+    ticket.create_event(10_u256, Option::None, Option::None, 0_u16, "ipfs://QmA");
+    let id2 = ticket.create_event(20_u256, Option::None, Option::None, 0_u16, "ipfs://QmB");
+    stop_cheat_caller_address(addr);
+    assert(id2 == 2_u256, 'second event id should be 2');
 }
 
 #[test]
-fn test_create_ticket_collection_accepts_ar_uri() {
-    let ticket_collection = deploy_ticket_collection();
-
-    cheat_caller_address(ticket_collection.contract_address, CREATOR(), CheatSpan::TargetCalls(1));
-    let collection_id = ticket_collection
-        .create_ticket_collection(0, 10, 10_000, 0, Option::None, AR_URI());
-
-    assert(
-        ticket_collection.get_ticket_collection(collection_id).metadata_uri == AR_URI(), 'ar uri',
-    );
-}
-
-#[test]
-#[should_panic(expected: 'URI must be ipfs:// or ar://')]
-fn test_create_ticket_collection_rejects_http_uri() {
-    let ticket_collection = deploy_ticket_collection();
-
-    cheat_caller_address(ticket_collection.contract_address, CREATOR(), CheatSpan::TargetCalls(1));
-    ticket_collection.create_ticket_collection(0, 10, 10_000, 0, Option::None, HTTP_URI());
+#[should_panic(expected: 'Caller is not the owner')]
+fn test_create_event_non_owner_panics() {
+    let addr = deploy_collection();
+    let ticket = IIPTicketCollectionDispatcher { contract_address: addr };
+    start_cheat_caller_address(addr, OTHER());
+    ticket.create_event(10_u256, Option::None, Option::None, 0_u16, "ipfs://QmX");
 }
 
 #[test]
 #[should_panic(expected: 'Max supply is zero')]
-fn test_create_ticket_collection_rejects_zero_supply() {
-    let ticket_collection = deploy_ticket_collection();
-
-    cheat_caller_address(ticket_collection.contract_address, CREATOR(), CheatSpan::TargetCalls(1));
-    ticket_collection.create_ticket_collection(0, 0, 10_000, 0, Option::None, IPFS_URI());
+fn test_create_event_zero_supply_panics() {
+    let owner = deploy_mock_account();
+    let addr = deploy_collection_with_owner(owner);
+    let ticket = IIPTicketCollectionDispatcher { contract_address: addr };
+    start_cheat_caller_address(addr, owner);
+    ticket.create_event(0_u256, Option::None, Option::None, 0_u16, "ipfs://QmX");
 }
 
 #[test]
-#[should_panic(expected: 'Expiration must be future')]
-fn test_create_ticket_collection_rejects_past_expiration() {
-    let ticket_collection = deploy_ticket_collection();
-
-    cheat_block_timestamp(ticket_collection.contract_address, 10_000, CheatSpan::TargetCalls(1));
-    cheat_caller_address(ticket_collection.contract_address, CREATOR(), CheatSpan::TargetCalls(1));
-    ticket_collection.create_ticket_collection(0, 10, 1_000, 0, Option::None, IPFS_URI());
+#[should_panic(expected: 'URI must be ipfs:// or ar://')]
+fn test_create_event_bad_uri_panics() {
+    let owner = deploy_mock_account();
+    let addr = deploy_collection_with_owner(owner);
+    let ticket = IIPTicketCollectionDispatcher { contract_address: addr };
+    start_cheat_caller_address(addr, owner);
+    ticket.create_event(10_u256, Option::None, Option::None, 0_u16, "https://example.com");
 }
 
 #[test]
 #[should_panic(expected: 'Royalty exceeds 10000')]
-fn test_create_ticket_collection_rejects_bad_royalty() {
-    let ticket_collection = deploy_ticket_collection();
-
-    cheat_caller_address(ticket_collection.contract_address, CREATOR(), CheatSpan::TargetCalls(1));
-    ticket_collection.create_ticket_collection(0, 10, 10_000, 10_001, Option::None, IPFS_URI());
+fn test_create_event_royalty_overflow_panics() {
+    let owner = deploy_mock_account();
+    let addr = deploy_collection_with_owner(owner);
+    let ticket = IIPTicketCollectionDispatcher { contract_address: addr };
+    start_cheat_caller_address(addr, owner);
+    ticket.create_event(10_u256, Option::None, Option::None, 10001_u16, "ipfs://QmX");
 }
 
 #[test]
-#[should_panic(expected: 'Paid ticket requires token')]
-fn test_paid_ticket_requires_token() {
-    let ticket_collection = deploy_ticket_collection();
-
-    cheat_caller_address(ticket_collection.contract_address, CREATOR(), CheatSpan::TargetCalls(1));
-    ticket_collection.create_ticket_collection(100, 10, 10_000, 0, Option::None, IPFS_URI());
+fn test_create_event_ar_uri_accepted() {
+    let owner = deploy_mock_account();
+    let addr = deploy_collection_with_owner(owner);
+    let ticket = IIPTicketCollectionDispatcher { contract_address: addr };
+    start_cheat_caller_address(addr, owner);
+    let id = ticket.create_event(5_u256, Option::None, Option::None, 0_u16, "ar://txhash123");
+    stop_cheat_caller_address(addr);
+    assert(id == 1_u256, 'ar:// uri should be accepted');
 }
 
-#[test]
-#[should_panic(expected: 'Free ticket cannot use token')]
-fn test_free_ticket_rejects_token() {
-    let ticket_collection = deploy_ticket_collection();
-    let erc20 = deploy_erc20();
+// ──────────────── mint ─────────────────────────────────────────────────────
 
-    cheat_caller_address(ticket_collection.contract_address, CREATOR(), CheatSpan::TargetCalls(1));
-    ticket_collection
-        .create_ticket_collection(
-            0, 10, 10_000, 0, Option::Some(erc20.contract_address), IPFS_URI(),
-        );
+#[test]
+fn test_mint_increases_balance() {
+    let owner = deploy_mock_account();
+    let recipient = deploy_mock_account();
+    let addr = deploy_collection_with_owner(owner);
+    let ticket = IIPTicketCollectionDispatcher { contract_address: addr };
+    let erc1155 = IERC1155Dispatcher { contract_address: addr };
+    start_cheat_caller_address(addr, owner);
+    let id = ticket.create_event(100_u256, Option::None, Option::None, 0_u16, "ipfs://QmM");
+    ticket.mint(recipient, id, 3_u256);
+    stop_cheat_caller_address(addr);
+    assert(erc1155.balance_of(recipient, id) == 3_u256, 'balance should be 3');
 }
 
 #[test]
 #[should_panic(expected: 'Caller is not the owner')]
-fn test_only_owner_can_create_collection() {
-    let ticket_collection = deploy_ticket_collection();
-
-    cheat_caller_address(ticket_collection.contract_address, USER1(), CheatSpan::TargetCalls(1));
-    ticket_collection.create_ticket_collection(0, 10, 10_000, 0, Option::None, IPFS_URI());
-}
-
-#[test]
-fn test_mint_free_ticket() {
-    let ticket_collection = deploy_ticket_collection();
-    let receiver = deploy_receiver();
-    let collection_id = create_free_collection(ticket_collection, 10_000);
-
-    cheat_block_timestamp(ticket_collection.contract_address, 1_000, CheatSpan::TargetCalls(1));
-    cheat_caller_address(ticket_collection.contract_address, receiver, CheatSpan::TargetCalls(1));
-    let token_id = ticket_collection.mint_ticket(collection_id, receiver);
-
-    assert(token_id == 1, 'token id should be one');
-    assert(ticket_collection.total_minted() == 1, 'total minted should be one');
-    assert(ticket_collection.has_valid_ticket(receiver, collection_id), 'receiver should be valid');
-    assert(
-        ticket_collection.get_active_ticket_balance(receiver, collection_id) == 1, 'active balance',
-    );
-
-    let erc721 = IERC721Dispatcher { contract_address: ticket_collection.contract_address };
-    assert(erc721.owner_of(token_id) == receiver, 'owner should be receiver');
-
-    let metadata = IERC721MetadataDispatcher {
-        contract_address: ticket_collection.contract_address,
-    };
-    assert(metadata.token_uri(token_id) == IPFS_URI(), 'token uri should match');
-}
-
-#[test]
-fn test_paid_ticket_transfers_tokens() {
-    let ticket_collection = deploy_ticket_collection();
-    let receiver = deploy_receiver();
-    let erc20 = deploy_erc20();
-
-    cheat_caller_address(ticket_collection.contract_address, CREATOR(), CheatSpan::TargetCalls(1));
-    let collection_id = ticket_collection
-        .create_ticket_collection(
-            1000, 10, 10_000, 0, Option::Some(erc20.contract_address), IPFS_URI(),
-        );
-
-    mint_erc20(erc20.contract_address, receiver, 3000);
-    cheat_caller_address(erc20.contract_address, receiver, CheatSpan::TargetCalls(1));
-    erc20.approve(ticket_collection.contract_address, 1000);
-
-    cheat_caller_address(ticket_collection.contract_address, receiver, CheatSpan::TargetCalls(1));
-    ticket_collection.mint_ticket(collection_id, receiver);
-
-    assert(erc20.balance_of(CREATOR()) == 1000, 'creator should be paid');
-    assert(erc20.balance_of(receiver) == 2000, 'buyer should pay');
+fn test_mint_non_owner_panics() {
+    let owner = deploy_mock_account();
+    let recipient = deploy_mock_account();
+    let addr = deploy_collection_with_owner(owner);
+    let ticket = IIPTicketCollectionDispatcher { contract_address: addr };
+    start_cheat_caller_address(addr, owner);
+    let id = ticket.create_event(10_u256, Option::None, Option::None, 0_u16, "ipfs://QmM");
+    stop_cheat_caller_address(addr);
+    start_cheat_caller_address(addr, OTHER());
+    ticket.mint(recipient, id, 1_u256);
 }
 
 #[test]
 #[should_panic(expected: 'Max supply reached')]
-fn test_mint_ticket_rejects_over_supply() {
-    let ticket_collection = deploy_ticket_collection();
-    let receiver = deploy_receiver();
-
-    cheat_caller_address(ticket_collection.contract_address, CREATOR(), CheatSpan::TargetCalls(1));
-    let collection_id = ticket_collection
-        .create_ticket_collection(0, 1, 10_000, 0, Option::None, IPFS_URI());
-
-    cheat_caller_address(ticket_collection.contract_address, receiver, CheatSpan::TargetCalls(1));
-    ticket_collection.mint_ticket(collection_id, receiver);
-
-    cheat_caller_address(ticket_collection.contract_address, receiver, CheatSpan::TargetCalls(1));
-    ticket_collection.mint_ticket(collection_id, receiver);
+fn test_mint_exceeds_supply_panics() {
+    let owner = deploy_mock_account();
+    let recipient = deploy_mock_account();
+    let addr = deploy_collection_with_owner(owner);
+    let ticket = IIPTicketCollectionDispatcher { contract_address: addr };
+    start_cheat_caller_address(addr, owner);
+    let id = ticket.create_event(2_u256, Option::None, Option::None, 0_u16, "ipfs://QmS");
+    ticket.mint(recipient, id, 3_u256);
 }
 
 #[test]
-#[should_panic(expected: 'Ticket collection expired')]
-fn test_mint_ticket_rejects_expired_collection() {
-    let ticket_collection = deploy_ticket_collection();
-    let receiver = deploy_receiver();
-    let collection_id = create_free_collection(ticket_collection, 10_000);
-
-    cheat_block_timestamp(ticket_collection.contract_address, 10_000, CheatSpan::TargetCalls(1));
-    cheat_caller_address(ticket_collection.contract_address, receiver, CheatSpan::TargetCalls(1));
-    ticket_collection.mint_ticket(collection_id, receiver);
+#[should_panic(expected: 'Event is paused')]
+fn test_mint_paused_event_panics() {
+    let owner = deploy_mock_account();
+    let recipient = deploy_mock_account();
+    let addr = deploy_collection_with_owner(owner);
+    let ticket = IIPTicketCollectionDispatcher { contract_address: addr };
+    start_cheat_caller_address(addr, owner);
+    let id = ticket.create_event(10_u256, Option::None, Option::None, 0_u16, "ipfs://QmP");
+    ticket.pause_event(id, false);
+    ticket.mint(recipient, id, 1_u256);
 }
 
 #[test]
-#[should_panic]
-fn test_mint_to_non_receiver_rejected() {
-    let ticket_collection = deploy_ticket_collection();
-    let collection_id = create_free_collection(ticket_collection, 10_000);
-
-    cheat_caller_address(
-        ticket_collection.contract_address,
-        ticket_collection.contract_address,
-        CheatSpan::TargetCalls(1),
+#[should_panic(expected: 'Minting not yet open')]
+fn test_mint_before_start_time_panics() {
+    let owner = deploy_mock_account();
+    let recipient = deploy_mock_account();
+    let addr = deploy_collection_with_owner(owner);
+    let ticket = IIPTicketCollectionDispatcher { contract_address: addr };
+    start_cheat_block_timestamp(addr, 1000);
+    start_cheat_caller_address(addr, owner);
+    let id = ticket.create_event(
+        10_u256, Option::Some(2000_u64), Option::None, 0_u16, "ipfs://QmT",
     );
-    ticket_collection.mint_ticket(collection_id, ticket_collection.contract_address);
+    ticket.mint(recipient, id, 1_u256);
 }
 
 #[test]
-fn test_transfer_moves_access() {
-    let ticket_collection = deploy_ticket_collection();
-    let receiver_1 = deploy_receiver();
-    let receiver_2 = deploy_receiver();
-    let collection_id = create_free_collection(ticket_collection, 10_000);
-
-    cheat_caller_address(ticket_collection.contract_address, receiver_1, CheatSpan::TargetCalls(1));
-    let token_id = ticket_collection.mint_ticket(collection_id, receiver_1);
-
-    let erc721 = IERC721Dispatcher { contract_address: ticket_collection.contract_address };
-    cheat_caller_address(ticket_collection.contract_address, receiver_1, CheatSpan::TargetCalls(1));
-    erc721.transfer_from(receiver_1, receiver_2, token_id);
-
-    assert(
-        !ticket_collection.has_valid_ticket(receiver_1, collection_id), 'sender should lose access',
+#[should_panic(expected: 'Minting window closed')]
+fn test_mint_after_end_time_panics() {
+    let owner = deploy_mock_account();
+    let recipient = deploy_mock_account();
+    let addr = deploy_collection_with_owner(owner);
+    let ticket = IIPTicketCollectionDispatcher { contract_address: addr };
+    start_cheat_block_timestamp(addr, 3000);
+    start_cheat_caller_address(addr, owner);
+    let id = ticket.create_event(
+        10_u256, Option::None, Option::Some(2000_u64), 0_u16, "ipfs://QmE",
     );
-    assert(
-        ticket_collection.has_valid_ticket(receiver_2, collection_id),
-        'receiver should gain access',
-    );
-    assert(
-        ticket_collection.get_active_ticket_balance(receiver_1, collection_id) == 0, 'sender bal',
-    );
-    assert(
-        ticket_collection.get_active_ticket_balance(receiver_2, collection_id) == 1, 'receiver bal',
-    );
+    ticket.mint(recipient, id, 1_u256);
 }
 
 #[test]
-fn test_redeem_ticket_removes_access() {
-    let ticket_collection = deploy_ticket_collection();
-    let receiver = deploy_receiver();
-    let collection_id = create_free_collection(ticket_collection, 10_000);
+fn test_mint_within_window() {
+    let owner = deploy_mock_account();
+    let recipient = deploy_mock_account();
+    let addr = deploy_collection_with_owner(owner);
+    let ticket = IIPTicketCollectionDispatcher { contract_address: addr };
+    let erc1155 = IERC1155Dispatcher { contract_address: addr };
+    start_cheat_block_timestamp(addr, 500);
+    start_cheat_caller_address(addr, owner);
+    let id = ticket.create_event(
+        10_u256, Option::Some(100_u64), Option::Some(1000_u64), 0_u16, "ipfs://QmW",
+    );
+    ticket.mint(recipient, id, 2_u256);
+    stop_cheat_caller_address(addr);
+    assert(erc1155.balance_of(recipient, id) == 2_u256, 'balance in window');
+}
 
-    cheat_caller_address(ticket_collection.contract_address, receiver, CheatSpan::TargetCalls(1));
-    let token_id = ticket_collection.mint_ticket(collection_id, receiver);
+// ──────────────── is_valid ─────────────────────────────────────────────────
 
-    cheat_caller_address(ticket_collection.contract_address, receiver, CheatSpan::TargetCalls(1));
-    ticket_collection.redeem_ticket(token_id);
-
-    assert(!ticket_collection.has_valid_ticket(receiver, collection_id), 'redeemed loses access');
-    let data = ticket_collection.get_ticket_data(token_id);
-    assert(data.redeemed, 'ticket should be redeemed');
-    assert(!data.valid, 'ticket should be invalid');
+#[test]
+fn test_is_valid_true_for_holder_in_window() {
+    let owner = deploy_mock_account();
+    let recipient = deploy_mock_account();
+    let addr = deploy_collection_with_owner(owner);
+    let ticket = IIPTicketCollectionDispatcher { contract_address: addr };
+    start_cheat_block_timestamp(addr, 500);
+    start_cheat_caller_address(addr, owner);
+    let id = ticket.create_event(
+        10_u256, Option::Some(100_u64), Option::Some(1000_u64), 0_u16, "ipfs://QmV",
+    );
+    ticket.mint(recipient, id, 1_u256);
+    stop_cheat_caller_address(addr);
+    assert(ticket.is_valid(id, recipient), 'should be valid');
 }
 
 #[test]
-#[should_panic(expected: 'Ticket already redeemed')]
-fn test_cannot_redeem_twice() {
-    let ticket_collection = deploy_ticket_collection();
-    let receiver = deploy_receiver();
-    let collection_id = create_free_collection(ticket_collection, 10_000);
-
-    cheat_caller_address(ticket_collection.contract_address, receiver, CheatSpan::TargetCalls(1));
-    let token_id = ticket_collection.mint_ticket(collection_id, receiver);
-
-    cheat_caller_address(ticket_collection.contract_address, receiver, CheatSpan::TargetCalls(1));
-    ticket_collection.redeem_ticket(token_id);
-
-    cheat_caller_address(ticket_collection.contract_address, receiver, CheatSpan::TargetCalls(1));
-    ticket_collection.redeem_ticket(token_id);
+fn test_is_valid_false_after_end_time() {
+    let owner = deploy_mock_account();
+    let recipient = deploy_mock_account();
+    let addr = deploy_collection_with_owner(owner);
+    let ticket = IIPTicketCollectionDispatcher { contract_address: addr };
+    start_cheat_block_timestamp(addr, 500);
+    start_cheat_caller_address(addr, owner);
+    let id = ticket.create_event(
+        10_u256, Option::None, Option::Some(1000_u64), 0_u16, "ipfs://QmWW",
+    );
+    ticket.mint(recipient, id, 1_u256);
+    stop_cheat_caller_address(addr);
+    start_cheat_block_timestamp(addr, 2000);
+    assert(!ticket.is_valid(id, recipient), 'invalid after end');
 }
+
+#[test]
+fn test_is_valid_false_for_non_holder() {
+    let owner = deploy_mock_account();
+    let recipient = deploy_mock_account();
+    let non_holder = deploy_mock_account();
+    let addr = deploy_collection_with_owner(owner);
+    let ticket = IIPTicketCollectionDispatcher { contract_address: addr };
+    start_cheat_caller_address(addr, owner);
+    let id = ticket.create_event(10_u256, Option::None, Option::None, 0_u16, "ipfs://QmN");
+    ticket.mint(recipient, id, 1_u256);
+    stop_cheat_caller_address(addr);
+    assert(!ticket.is_valid(id, non_holder), 'non-holder invalid');
+}
+
+#[test]
+fn test_is_valid_no_time_window() {
+    let owner = deploy_mock_account();
+    let recipient = deploy_mock_account();
+    let addr = deploy_collection_with_owner(owner);
+    let ticket = IIPTicketCollectionDispatcher { contract_address: addr };
+    start_cheat_caller_address(addr, owner);
+    let id = ticket.create_event(10_u256, Option::None, Option::None, 0_u16, "ipfs://QmO");
+    ticket.mint(recipient, id, 1_u256);
+    stop_cheat_caller_address(addr);
+    assert(ticket.is_valid(id, recipient), 'no window = always valid');
+}
+
+// ──────────────── pause_event ──────────────────────────────────────────────
+
+#[test]
+fn test_pause_and_resume_event() {
+    let owner = deploy_mock_account();
+    let addr = deploy_collection_with_owner(owner);
+    let ticket = IIPTicketCollectionDispatcher { contract_address: addr };
+    start_cheat_caller_address(addr, owner);
+    let id = ticket.create_event(10_u256, Option::None, Option::None, 0_u16, "ipfs://QmPR");
+    ticket.pause_event(id, false);
+    let ev = ticket.get_event(id);
+    assert(!ev.active, 'should be paused');
+    ticket.pause_event(id, true);
+    let ev2 = ticket.get_event(id);
+    assert(ev2.active, 'should be resumed');
+}
+
+// ──────────────── royalty_info ─────────────────────────────────────────────
 
 #[test]
 fn test_royalty_info() {
-    let ticket_collection = deploy_ticket_collection();
-    let receiver = deploy_receiver();
-    let collection_id = create_free_collection(ticket_collection, 10_000);
-
-    cheat_caller_address(ticket_collection.contract_address, receiver, CheatSpan::TargetCalls(1));
-    let token_id = ticket_collection.mint_ticket(collection_id, receiver);
-
-    let (recipient, amount) = ticket_collection.royaltyInfo(token_id, 1000);
-    assert(recipient == CREATOR(), 'royalty recipient');
-    assert(amount == 50, 'royalty amount');
+    let owner = deploy_mock_account();
+    let addr = deploy_collection_with_owner(owner);
+    let ticket = IIPTicketCollectionDispatcher { contract_address: addr };
+    start_cheat_caller_address(addr, owner);
+    let id = ticket.create_event(10_u256, Option::None, Option::None, 500_u16, "ipfs://QmR");
+    stop_cheat_caller_address(addr);
+    let (receiver, amount) = ticket.royalty_info(id, 10000_u256);
+    assert(receiver == owner, 'receiver should be owner');
+    assert(amount == 500_u256, 'royalty 5% of 10000 = 500');
 }
 
 #[test]
-#[should_panic]
-fn test_royalty_info_rejects_missing_token() {
-    let ticket_collection = deploy_ticket_collection();
-
-    ticket_collection.royaltyInfo(999, 1000);
+fn test_royalty_info_camel() {
+    let owner = deploy_mock_account();
+    let addr = deploy_collection_with_owner(owner);
+    let ticket = IIPTicketCollectionDispatcher { contract_address: addr };
+    start_cheat_caller_address(addr, owner);
+    let id = ticket.create_event(10_u256, Option::None, Option::None, 1000_u16, "ipfs://QmRC");
+    stop_cheat_caller_address(addr);
+    let (_, amount) = ticket.royaltyInfo(id, 10000_u256);
+    assert(amount == 1000_u256, 'royalty 10% of 10000');
 }
 
-// Without a lock, a payment token reentering `mint_ticket` runs under its own
-// caller context: the inner mint targets the token contract itself, which is
-// not an ERC-721 receiver, so the whole transaction reverts atomically — the
-// buyer is never charged and no state is corrupted (checks-effects-
-// interactions: storage is consistent at the external call).
+// ──────────────── get_event ────────────────────────────────────────────────
+
 #[test]
-#[should_panic]
-fn test_reentrant_payment_token_reverts_atomically() {
-    let ticket_collection = deploy_ticket_collection();
-    let expected_collection_id = 1;
-    let token = deploy_reentrant_payment_token(
-        ticket_collection.contract_address, expected_collection_id,
+fn test_get_event_returns_record() {
+    let owner = deploy_mock_account();
+    let addr = deploy_collection_with_owner(owner);
+    let ticket = IIPTicketCollectionDispatcher { contract_address: addr };
+    start_cheat_caller_address(addr, owner);
+    let id = ticket.create_event(
+        42_u256, Option::Some(100_u64), Option::Some(999_u64), 250_u16, "ipfs://QmG",
     );
+    stop_cheat_caller_address(addr);
+    let ev = ticket.get_event(id);
+    assert(ev.max_supply == 42_u256, 'max_supply');
+    assert(ev.royalty_bps == 250_u16, 'royalty_bps');
+    assert(ev.active, 'active by default');
+    assert(ev.minted == 0_u256, 'minted starts at 0');
+}
 
-    cheat_caller_address(ticket_collection.contract_address, CREATOR(), CheatSpan::TargetCalls(1));
-    let collection_id = ticket_collection
-        .create_ticket_collection(1000, 10, 10_000, 0, Option::Some(token), IPFS_URI());
-    assert(collection_id == expected_collection_id, 'expected first collection');
+// ──────────────── version & SRC5 ──────────────────────────────────────────
 
-    cheat_caller_address(ticket_collection.contract_address, USER1(), CheatSpan::TargetCalls(1));
-    ticket_collection.mint_ticket(collection_id, USER1());
+#[test]
+fn test_version() {
+    let addr = deploy_collection();
+    let ticket = IIPTicketCollectionDispatcher { contract_address: addr };
+    assert(ticket.version() == "3.0.0", 'version should be 3.0.0');
 }
 
 #[test]
-#[should_panic(expected: 'Caller is not the owner')]
-fn test_only_owner_can_toggle() {
-    let ticket_collection = deploy_ticket_collection();
-    let collection_id = create_free_collection(ticket_collection, 10_000);
-
-    cheat_caller_address(ticket_collection.contract_address, USER1(), CheatSpan::TargetCalls(1));
-    ticket_collection.set_collection_active(collection_id, false);
-}
-
-#[test]
-#[should_panic(expected: 'Ticket collection not found')]
-fn test_toggle_unknown_collection_reverts() {
-    let ticket_collection = deploy_ticket_collection();
-
-    cheat_caller_address(ticket_collection.contract_address, CREATOR(), CheatSpan::TargetCalls(1));
-    ticket_collection.set_collection_active(42, false);
-}
-
-#[test]
-#[should_panic(expected: 'Collection is inactive')]
-fn test_deactivation_blocks_mint() {
-    let ticket_collection = deploy_ticket_collection();
-    let receiver = deploy_receiver();
-    let collection_id = create_free_collection(ticket_collection, 10_000);
-
-    cheat_caller_address(ticket_collection.contract_address, CREATOR(), CheatSpan::TargetCalls(1));
-    ticket_collection.set_collection_active(collection_id, false);
-
-    cheat_caller_address(ticket_collection.contract_address, receiver, CheatSpan::TargetCalls(1));
-    ticket_collection.mint_ticket(collection_id, receiver);
-}
-
-#[test]
-fn test_deactivation_preserves_existing_tickets() {
-    let ticket_collection = deploy_ticket_collection();
-    let receiver_1 = deploy_receiver();
-    let receiver_2 = deploy_receiver();
-    let collection_id = create_free_collection(ticket_collection, 10_000);
-
-    cheat_caller_address(ticket_collection.contract_address, receiver_1, CheatSpan::TargetCalls(1));
-    let token_id = ticket_collection.mint_ticket(collection_id, receiver_1);
-
-    cheat_caller_address(ticket_collection.contract_address, CREATOR(), CheatSpan::TargetCalls(1));
-    ticket_collection.set_collection_active(collection_id, false);
-
-    // Access, transfer, and redemption all survive deactivation.
-    assert(ticket_collection.has_valid_ticket(receiver_1, collection_id), 'access should survive');
-
-    let erc721 = IERC721Dispatcher { contract_address: ticket_collection.contract_address };
-    cheat_caller_address(ticket_collection.contract_address, receiver_1, CheatSpan::TargetCalls(1));
-    erc721.transfer_from(receiver_1, receiver_2, token_id);
-    assert(
-        ticket_collection.has_valid_ticket(receiver_2, collection_id), 'transfer should survive',
-    );
-
-    cheat_caller_address(ticket_collection.contract_address, receiver_2, CheatSpan::TargetCalls(1));
-    ticket_collection.redeem_ticket(token_id);
-    assert(ticket_collection.get_ticket_data(token_id).redeemed, 'redeem should survive');
-}
-
-#[test]
-fn test_reactivation_allows_mint() {
-    let ticket_collection = deploy_ticket_collection();
-    let receiver = deploy_receiver();
-    let collection_id = create_free_collection(ticket_collection, 10_000);
-
-    cheat_caller_address(ticket_collection.contract_address, CREATOR(), CheatSpan::TargetCalls(1));
-    ticket_collection.set_collection_active(collection_id, false);
-    cheat_caller_address(ticket_collection.contract_address, CREATOR(), CheatSpan::TargetCalls(1));
-    ticket_collection.set_collection_active(collection_id, true);
-
-    cheat_caller_address(ticket_collection.contract_address, receiver, CheatSpan::TargetCalls(1));
-    ticket_collection.mint_ticket(collection_id, receiver);
-    assert(ticket_collection.has_valid_ticket(receiver, collection_id), 'mint should work again');
-}
-
-#[test]
-fn test_royalty_info_snake_case() {
-    let ticket_collection = deploy_ticket_collection();
-    let receiver = deploy_receiver();
-    let collection_id = create_free_collection(ticket_collection, 10_000);
-
-    cheat_caller_address(ticket_collection.contract_address, receiver, CheatSpan::TargetCalls(1));
-    let token_id = ticket_collection.mint_ticket(collection_id, receiver);
-
-    let (recipient, amount) = ticket_collection.royalty_info(token_id, 1000);
-    assert(recipient == CREATOR(), 'royalty recipient');
-    assert(amount == 50, 'royalty amount');
-}
-
-#[test]
-fn test_supports_ticket_collection_interface() {
-    let ticket_collection = deploy_ticket_collection();
-    let src5 = ISRC5Dispatcher { contract_address: ticket_collection.contract_address };
-
-    assert(src5.supports_interface(IIP_TICKET_COLLECTION_ID), 'interface supported');
-    assert(src5.supports_interface(IERC2981_ID), 'erc2981 supported');
-}
-
-#[test]
-fn test_supports_licensed_collection_interface() {
-    let collection = deploy_ticket_collection();
-    let src5 = ISRC5Dispatcher { contract_address: collection.contract_address };
-    assert(src5.supports_interface(ILICENSED_COLLECTION_ID), 'licensed marker missing');
-}
-
-#[test]
-fn test_collection_version() {
-    let collection = deploy_ticket_collection();
-    assert_eq!(collection.version(), "2.0.0");
-}
-
-#[test]
-fn test_mint_ticket_to_recipient_other_than_payer() {
-    let ticket_collection = deploy_ticket_collection();
-    let payer = USER1();
-    let recipient = deploy_receiver();
-    let collection_id = create_free_collection(ticket_collection, 10_000);
-
-    cheat_block_timestamp(ticket_collection.contract_address, 1_000, CheatSpan::TargetCalls(1));
-    cheat_caller_address(ticket_collection.contract_address, payer, CheatSpan::TargetCalls(1));
-    let mut spy = spy_events();
-    let token_id = ticket_collection.mint_ticket(collection_id, recipient);
-
-    let erc721 = IERC721Dispatcher { contract_address: ticket_collection.contract_address };
-    assert(erc721.owner_of(token_id) == recipient, 'recipient should own ticket');
-    assert(
-        ticket_collection.get_active_ticket_balance(recipient, collection_id) == 1,
-        'recipient active balance',
-    );
-    assert(
-        ticket_collection.get_active_ticket_balance(payer, collection_id) == 0,
-        'payer holds nothing',
-    );
-
-    spy
-        .assert_emitted(
-            @array![
-                (
-                    ticket_collection.contract_address,
-                    Event::TicketMinted(
-                        TicketMinted {
-                            token_id, collection_id, owner: recipient, payer, minted_at: 1_000,
-                        },
-                    ),
-                ),
-            ],
-        );
+fn test_erc2981_interface_registered() {
+    let addr = deploy_collection();
+    let src5 = ISRC5Dispatcher { contract_address: addr };
+    assert(src5.supports_interface(IERC2981_ID), 'should support IERC2981');
 }

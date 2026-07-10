@@ -1,23 +1,27 @@
 #[starknet::contract]
 pub mod Receiver {
     use openzeppelin_introspection::src5::SRC5Component;
-    use openzeppelin_token::erc721::ERC721ReceiverComponent;
+    use openzeppelin_token::erc1155::ERC1155ReceiverComponent;
 
-    component!(path: ERC721ReceiverComponent, storage: erc721_receiver, event: ERC721ReceiverEvent);
+    component!(path: ERC1155ReceiverComponent, storage: erc1155_receiver, event: ERC1155ReceiverEvent);
     component!(path: SRC5Component, storage: src5, event: SRC5Event);
 
     #[abi(embed_v0)]
-    impl ERC721ReceiverImpl =
-        ERC721ReceiverComponent::ERC721ReceiverImpl<ContractState>;
-    impl ERC721ReceiverInternalImpl = ERC721ReceiverComponent::InternalImpl<ContractState>;
+    impl ERC1155ReceiverImpl =
+        ERC1155ReceiverComponent::ERC1155ReceiverImpl<ContractState>;
+    #[abi(embed_v0)]
+    impl ERC1155ReceiverCamelImpl =
+        ERC1155ReceiverComponent::ERC1155ReceiverCamelImpl<ContractState>;
+    impl ERC1155ReceiverInternalImpl = ERC1155ReceiverComponent::InternalImpl<ContractState>;
 
     #[abi(embed_v0)]
     impl SRC5Impl = SRC5Component::SRC5Impl<ContractState>;
+    impl SRC5InternalImpl = SRC5Component::InternalImpl<ContractState>;
 
     #[storage]
     struct Storage {
         #[substorage(v0)]
-        erc721_receiver: ERC721ReceiverComponent::Storage,
+        erc1155_receiver: ERC1155ReceiverComponent::Storage,
         #[substorage(v0)]
         src5: SRC5Component::Storage,
     }
@@ -26,13 +30,13 @@ pub mod Receiver {
     #[derive(Drop, starknet::Event)]
     enum Event {
         #[flat]
-        ERC721ReceiverEvent: ERC721ReceiverComponent::Event,
+        ERC1155ReceiverEvent: ERC1155ReceiverComponent::Event,
         #[flat]
         SRC5Event: SRC5Component::Event,
     }
 
     #[constructor]
     fn constructor(ref self: ContractState) {
-        self.erc721_receiver.initializer();
+        self.erc1155_receiver.initializer();
     }
 }

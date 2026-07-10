@@ -1,216 +1,118 @@
-use ip_ticket::IPTicketCollectionFactory::IPTicketCollectionFactory::{CollectionDeployed, Event};
+use core::num::traits::Zero;
 use ip_ticket::interface::{
     IIPTicketCollectionDispatcher, IIPTicketCollectionDispatcherTrait,
     IIPTicketCollectionFactoryDispatcher, IIPTicketCollectionFactoryDispatcherTrait,
     IIP_TICKET_COLLECTION_FACTORY_ID,
 };
-use openzeppelin_access::ownable::interface::{IOwnableDispatcher, IOwnableDispatcherTrait};
+use openzeppelin_utils::serde::SerializedAppend;
 use openzeppelin_introspection::interface::{ISRC5Dispatcher, ISRC5DispatcherTrait};
-use openzeppelin_token::erc721::interface::{
-    IERC721MetadataDispatcher, IERC721MetadataDispatcherTrait,
-};
 use snforge_std::{
-    CheatSpan, ContractClassTrait, DeclareResultTrait, EventSpyAssertionsTrait,
-    cheat_caller_address, declare, spy_events,
+    ContractClassTrait, DeclareResultTrait, declare, start_cheat_caller_address,
+    stop_cheat_caller_address,
 };
-use starknet::{ClassHash, ContractAddress};
+use starknet::ContractAddress;
 
-fn USER1() -> ContractAddress {
-    0x200.try_into().unwrap()
-}
-fn USER2() -> ContractAddress {
-    0x300.try_into().unwrap()
-}
-
-fn COLLECTION_NAME() -> ByteArray {
-    "General Admission"
-}
-fn COLLECTION_SYMBOL() -> ByteArray {
-    "GA"
-}
-fn COLLECTION_NAME_2() -> ByteArray {
-    "VIP Passes"
-}
-fn COLLECTION_SYMBOL_2() -> ByteArray {
-    "VIP"
+fn deploy_mock_account() -> ContractAddress {
+    let class = declare("MockAccount").unwrap().contract_class();
+    let (addr, _) = class.deploy(@array![]).unwrap();
+    addr
 }
 
-fn collection_class_hash() -> ClassHash {
-    let declare_result = declare("IPTicketCollection").unwrap();
-    *declare_result.contract_class().class_hash
+fn deploy_factory() -> ContractAddress {
+    let collection_class = declare("IPTicketCollection").unwrap().contract_class();
+    let factory_class = declare("IPTicketCollectionFactory").unwrap().contract_class();
+    let mut cd: Array<felt252> = array![];
+    cd.append_serde(*collection_class.class_hash);
+    let (addr, _) = factory_class.deploy(@cd).unwrap();
+    addr
 }
 
-fn deploy_factory() -> (IIPTicketCollectionFactoryDispatcher, ContractAddress) {
-    let class_hash = collection_class_hash();
-    let mut calldata: Array<felt252> = array![];
-    class_hash.serialize(ref calldata);
+// ──────────────── deploy_collection ───────────────────────────────────────
 
-    let declare_result = declare("IPTicketCollectionFactory").unwrap();
-    let contract_class = declare_result.contract_class();
-    let (address, _) = contract_class.deploy(@calldata).unwrap();
-
-    (IIPTicketCollectionFactoryDispatcher { contract_address: address }, address)
+#[test]
+fn test_deploy_collection_returns_address() {
+    let factory_addr = deploy_factory();
+    let factory = IIPTicketCollectionFactoryDispatcher { contract_address: factory_addr };
+    let caller = deploy_mock_account();
+    start_cheat_caller_address(factory_addr, caller);
+    let col = factory.deploy_collection("Fest Tickets", "FEST");
+    stop_cheat_caller_address(factory_addr);
+    assert(!col.is_zero(), 'collection address is zero');
 }
 
 #[test]
-fn test_factory_constructor_class_hash() {
-    let (factory, _) = deploy_factory();
-    assert_eq!(factory.collection_class_hash(), collection_class_hash());
+fn test_deployed_collection_owner_is_caller() {
+    let factory_addr = deploy_factory();
+    let factory = IIPTicketCollectionFactoryDispatcher { contract_address: factory_addr };
+    let caller = deploy_mock_account();
+    start_cheat_caller_address(factory_addr, caller);
+    let col_addr = factory.deploy_collection("My Tickets", "TICK");
+    stop_cheat_caller_address(factory_addr);
+    // Caller should be able to create an event without panic
+    let ticket = IIPTicketCollectionDispatcher { contract_address: col_addr };
+    start_cheat_caller_address(col_addr, caller);
+    let id = ticket.create_event(10_u256, Option::None, Option::None, 0_u16, "ipfs://QmTest");
+    stop_cheat_caller_address(col_addr);
+    assert(id == 1_u256, 'first event id = 1');
+}
+
+#[test]
+fn test_two_deployments_have_different_addresses() {
+    let factory_addr = deploy_factory();
+    let factory = IIPTicketCollectionFactoryDispatcher { contract_address: factory_addr };
+    let caller = deploy_mock_account();
+    start_cheat_caller_address(factory_addr, caller);
+    let col1 = factory.deploy_collection("Event A", "EVA");
+    let col2 = factory.deploy_collection("Event B", "EVB");
+    stop_cheat_caller_address(factory_addr);
+    assert(col1 != col2, 'addresses must differ');
+}
+
+#[test]
+fn test_different_callers_get_different_addresses() {
+    let factory_addr = deploy_factory();
+    let factory = IIPTicketCollectionFactoryDispatcher { contract_address: factory_addr };
+    let caller1 = deploy_mock_account();
+    let caller2 = deploy_mock_account();
+    start_cheat_caller_address(factory_addr, caller1);
+    let col1 = factory.deploy_collection("Tickets", "TIX");
+    stop_cheat_caller_address(factory_addr);
+    start_cheat_caller_address(factory_addr, caller2);
+    let col2 = factory.deploy_collection("Tickets", "TIX");
+    stop_cheat_caller_address(factory_addr);
+    assert(col1 != col2, 'different callers differ');
 }
 
 #[test]
 fn test_factory_version() {
-    let (factory, _) = deploy_factory();
-    assert_eq!(factory.version(), "2.0.0");
+    let factory_addr = deploy_factory();
+    let factory = IIPTicketCollectionFactoryDispatcher { contract_address: factory_addr };
+    assert(factory.version() == "3.0.0", 'factory version 3.0.0');
 }
 
 #[test]
-fn test_deploy_ticket_collection_returns_nonzero_address() {
-    let (factory, address) = deploy_factory();
-
-    cheat_caller_address(address, USER1(), CheatSpan::TargetCalls(1));
-    let collection_address = factory
-        .deploy_ticket_collection(COLLECTION_NAME(), COLLECTION_SYMBOL());
-
-    assert!(collection_address.into() != 0_felt252, "Collection address must be non-zero");
-}
-
-#[test]
-fn test_deploy_ticket_collection_caller_is_owner() {
-    let (factory, address) = deploy_factory();
-
-    cheat_caller_address(address, USER1(), CheatSpan::TargetCalls(1));
-    let collection_address = factory
-        .deploy_ticket_collection(COLLECTION_NAME(), COLLECTION_SYMBOL());
-
-    let ownable = IOwnableDispatcher { contract_address: collection_address };
-    assert_eq!(ownable.owner(), USER1());
-}
-
-#[test]
-fn test_deploy_ticket_collection_stores_name_symbol() {
-    let (factory, address) = deploy_factory();
-
-    cheat_caller_address(address, USER1(), CheatSpan::TargetCalls(1));
-    let collection_address = factory
-        .deploy_ticket_collection(COLLECTION_NAME(), COLLECTION_SYMBOL());
-
-    let metadata = IERC721MetadataDispatcher { contract_address: collection_address };
-    assert_eq!(metadata.name(), COLLECTION_NAME());
-    assert_eq!(metadata.symbol(), COLLECTION_SYMBOL());
-}
-
-#[test]
-fn test_deploy_ticket_collection_emits_collection_deployed_event() {
-    let (factory, address) = deploy_factory();
-
-    cheat_caller_address(address, USER1(), CheatSpan::TargetCalls(1));
-    let mut spy = spy_events();
-    let collection_address = factory
-        .deploy_ticket_collection(COLLECTION_NAME(), COLLECTION_SYMBOL());
-
-    spy
-        .assert_emitted(
-            @array![
-                (
-                    address,
-                    Event::CollectionDeployed(
-                        CollectionDeployed {
-                            collection_address,
-                            owner: USER1(),
-                            name: COLLECTION_NAME(),
-                            symbol: COLLECTION_SYMBOL(),
-                        },
-                    ),
-                ),
-            ],
-        );
-}
-
-#[test]
-fn test_deploy_two_ticket_collections_different_addresses() {
-    let (factory, address) = deploy_factory();
-
-    cheat_caller_address(address, USER1(), CheatSpan::TargetCalls(1));
-    let addr1 = factory.deploy_ticket_collection(COLLECTION_NAME(), COLLECTION_SYMBOL());
-
-    cheat_caller_address(address, USER1(), CheatSpan::TargetCalls(1));
-    let addr2 = factory.deploy_ticket_collection(COLLECTION_NAME_2(), COLLECTION_SYMBOL_2());
-
-    assert!(addr1 != addr2, "Each deploy must produce a unique address");
-}
-
-#[test]
-fn test_deploy_ticket_collection_by_different_callers() {
-    let (factory, address) = deploy_factory();
-
-    cheat_caller_address(address, USER1(), CheatSpan::TargetCalls(1));
-    let addr1 = factory.deploy_ticket_collection(COLLECTION_NAME(), COLLECTION_SYMBOL());
-
-    cheat_caller_address(address, USER2(), CheatSpan::TargetCalls(1));
-    let addr2 = factory.deploy_ticket_collection(COLLECTION_NAME_2(), COLLECTION_SYMBOL_2());
-
-    let ownable1 = IOwnableDispatcher { contract_address: addr1 };
-    let ownable2 = IOwnableDispatcher { contract_address: addr2 };
-    assert_eq!(ownable1.owner(), USER1());
-    assert_eq!(ownable2.owner(), USER2());
-}
-
-#[test]
-fn test_deployed_ticket_collection_owner_can_create_collection() {
-    let (factory, address) = deploy_factory();
-
-    cheat_caller_address(address, USER1(), CheatSpan::TargetCalls(1));
-    let collection_address = factory
-        .deploy_ticket_collection(COLLECTION_NAME(), COLLECTION_SYMBOL());
-
-    let collection = IIPTicketCollectionDispatcher { contract_address: collection_address };
-    let metadata_uri: ByteArray = "ipfs://bafybeiticketcollection";
-
-    cheat_caller_address(collection_address, USER1(), CheatSpan::TargetCalls(1));
-    let collection_id = collection
-        .create_ticket_collection(0, 100, 999_999_999, 0, Option::None, metadata_uri);
-
-    assert_eq!(collection_id, 1);
-    assert_eq!(collection.get_ticket_collection(collection_id).creator, USER1());
+fn test_factory_src5_registered() {
+    let factory_addr = deploy_factory();
+    let src5 = ISRC5Dispatcher { contract_address: factory_addr };
+    assert(src5.supports_interface(IIP_TICKET_COLLECTION_FACTORY_ID), 'factory SRC5 registered');
 }
 
 #[test]
 #[should_panic(expected: 'Name must not be empty')]
-fn test_deploy_ticket_collection_empty_name_rejected() {
-    let (factory, address) = deploy_factory();
-
-    cheat_caller_address(address, USER1(), CheatSpan::TargetCalls(1));
-    factory.deploy_ticket_collection("", COLLECTION_SYMBOL());
+fn test_deploy_empty_name_panics() {
+    let factory_addr = deploy_factory();
+    let factory = IIPTicketCollectionFactoryDispatcher { contract_address: factory_addr };
+    let caller = deploy_mock_account();
+    start_cheat_caller_address(factory_addr, caller);
+    factory.deploy_collection("", "TIX");
 }
 
 #[test]
 #[should_panic(expected: 'Symbol must not be empty')]
-fn test_deploy_ticket_collection_empty_symbol_rejected() {
-    let (factory, address) = deploy_factory();
-
-    cheat_caller_address(address, USER1(), CheatSpan::TargetCalls(1));
-    factory.deploy_ticket_collection(COLLECTION_NAME(), "");
-}
-
-#[test]
-fn test_any_address_can_deploy_ticket_collection() {
-    let (factory, address) = deploy_factory();
-
-    cheat_caller_address(address, USER1(), CheatSpan::TargetCalls(1));
-    let addr1 = factory.deploy_ticket_collection(COLLECTION_NAME(), COLLECTION_SYMBOL());
-
-    cheat_caller_address(address, USER2(), CheatSpan::TargetCalls(1));
-    let addr2 = factory.deploy_ticket_collection(COLLECTION_NAME_2(), COLLECTION_SYMBOL_2());
-
-    assert!(addr1.into() != 0_felt252);
-    assert!(addr2.into() != 0_felt252);
-    assert!(addr1 != addr2);
-}
-
-#[test]
-fn test_factory_registers_src5_discovery_id() {
-    let (_, factory_address) = deploy_factory();
-    let src5 = ISRC5Dispatcher { contract_address: factory_address };
-    assert(src5.supports_interface(IIP_TICKET_COLLECTION_FACTORY_ID), 'factory id missing');
+fn test_deploy_empty_symbol_panics() {
+    let factory_addr = deploy_factory();
+    let factory = IIPTicketCollectionFactoryDispatcher { contract_address: factory_addr };
+    let caller = deploy_mock_account();
+    start_cheat_caller_address(factory_addr, caller);
+    factory.deploy_collection("My Tickets", "");
 }

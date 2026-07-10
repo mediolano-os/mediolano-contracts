@@ -41,7 +41,7 @@ pub mod IPTicketCollectionFactory {
     }
 
     /// Emitted each time a new IPTicketCollection is deployed via
-    /// `deploy_ticket_collection`.
+    /// `deploy_collection`.
     #[derive(Drop, starknet::Event)]
     pub struct CollectionDeployed {
         #[key]
@@ -73,10 +73,10 @@ pub mod IPTicketCollectionFactory {
         }
 
         fn version(self: @ContractState) -> ByteArray {
-            "2.0.0"
+            "3.0.0"
         }
 
-        fn deploy_ticket_collection(
+        fn deploy_collection(
             ref self: ContractState, name: ByteArray, symbol: ByteArray,
         ) -> ContractAddress {
             assert(name.len() > 0, 'Name must not be empty');

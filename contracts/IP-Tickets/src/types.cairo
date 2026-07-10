@@ -1,30 +1,17 @@
 use starknet::ContractAddress;
 
-// A collection exists iff `creator != 0` (create_ticket_collection rejects a
-// zero caller). `active` gates minting only — never transfers or redemption.
+/// One entry per `create_event` call. Stored at `events[token_id]`.
+/// `creator` is zero iff the event was never created — used as existence check.
 #[derive(Drop, Serde, starknet::Store, Clone)]
-pub struct TicketCollection {
+pub struct EventRecord {
     pub creator: ContractAddress,
-    pub price: u256,
     pub max_supply: u256,
     pub minted: u256,
-    pub expiration: u64,
-    pub royalty_bps: u256,
-    pub payment_token: Option<ContractAddress>,
+    pub start_time: Option<u64>,
+    pub end_time: Option<u64>,
+    pub royalty_bps: u16,
     pub metadata_uri: ByteArray,
     pub active: bool,
-}
-
-#[derive(Drop, Serde)]
-pub struct TicketData {
-    pub token_id: u256,
-    pub owner: ContractAddress,
-    pub collection_id: u256,
-    pub creator: ContractAddress,
-    pub metadata_uri: ByteArray,
-    pub expiration: u64,
-    pub redeemed: bool,
-    pub valid: bool,
 }
 
 pub fn bytearray_starts_with(haystack: @ByteArray, needle: @ByteArray) -> bool {

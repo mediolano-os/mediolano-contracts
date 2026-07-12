@@ -1,14 +1,19 @@
+use ip_club::IPClub::IPClub::Event;
+use ip_club::events::NewClubCreated;
 use ip_club::interfaces::IIPClub::{IIPClubDispatcherTrait, IIP_CLUB_ID};
 use ip_club::interfaces::IIPClubNFT::{
-    IIPClubNFTDispatcher, IIPClubNFTDispatcherTrait, IIP_CLUB_NFT_ID,
+    IIPClubNFTDispatcher, IIPClubNFTDispatcherTrait, IIP_CLUB_NFT_ID, ILICENSED_COLLECTION_ID,
 };
 use openzeppelin_introspection::interface::{ISRC5Dispatcher, ISRC5DispatcherTrait};
+use openzeppelin_token::common::erc2981::interface::IERC2981_ID;
 use openzeppelin_token::erc20::interface::IERC20DispatcherTrait;
 use openzeppelin_token::erc721::interface::{
     IERC721Dispatcher, IERC721DispatcherTrait, IERC721MetadataDispatcher,
     IERC721MetadataDispatcherTrait,
 };
-use snforge_std::{CheatSpan, cheat_caller_address};
+use snforge_std::{
+    CheatSpan, EventSpyAssertionsTrait, cheat_block_timestamp, cheat_caller_address, spy_events,
+};
 use crate::utils::*;
 
 fn IPFS_URI() -> ByteArray {
@@ -29,7 +34,9 @@ fn test_create_club_successfully() {
 
     cheat_caller_address(ip_club.contract_address, CREATOR(), CheatSpan::TargetCalls(1));
     let club_id = ip_club
-        .create_club("Vipers", "VPs", IPFS_URI(), Option::None, Option::None, Option::None);
+        .create_club(
+            "Vipers", "VPs", IPFS_URI(), Option::None, Option::None, Option::None, Option::None, 0,
+        );
 
     assert!(club_id == 1, "club id should be returned");
     assert!(ip_club.get_last_club_id() == club_id, "last club id should match");
@@ -49,7 +56,9 @@ fn test_create_club_accepts_ar_uri() {
     let TestContracts { ip_club, .. } = initialize_contracts();
 
     let club_id = ip_club
-        .create_club("Vipers", "VPs", AR_URI(), Option::None, Option::None, Option::None);
+        .create_club(
+            "Vipers", "VPs", AR_URI(), Option::None, Option::None, Option::None, Option::None, 0,
+        );
 
     let club_record = ip_club.get_club_record(club_id);
     let nft_meta = IERC721MetadataDispatcher { contract_address: club_record.club_nft };
@@ -61,7 +70,10 @@ fn test_create_club_accepts_ar_uri() {
 fn test_create_club_rejects_http_metadata() {
     let TestContracts { ip_club, .. } = initialize_contracts();
 
-    ip_club.create_club("Vipers", "VPs", HTTP_URI(), Option::None, Option::None, Option::None);
+    ip_club
+        .create_club(
+            "Vipers", "VPs", HTTP_URI(), Option::None, Option::None, Option::None, Option::None, 0,
+        );
 }
 
 #[test]
@@ -69,7 +81,17 @@ fn test_create_club_rejects_http_metadata() {
 fn test_create_club_with_invalid_max_members() {
     let TestContracts { ip_club, .. } = initialize_contracts();
 
-    ip_club.create_club("Vipers", "VPs", IPFS_URI(), Option::Some(0), Option::None, Option::None);
+    ip_club
+        .create_club(
+            "Vipers",
+            "VPs",
+            IPFS_URI(),
+            Option::Some(0),
+            Option::None,
+            Option::None,
+            Option::None,
+            0,
+        );
 }
 
 #[test]
@@ -85,6 +107,8 @@ fn test_create_club_with_payment_token_without_fee() {
             Option::None,
             Option::None,
             Option::Some(erc20_token.contract_address),
+            Option::None,
+            0,
         );
 }
 
@@ -94,7 +118,16 @@ fn test_create_club_with_fee_without_payment_token() {
     let TestContracts { ip_club, .. } = initialize_contracts();
 
     ip_club
-        .create_club("Vipers", "VPs", IPFS_URI(), Option::None, Option::Some(1000), Option::None);
+        .create_club(
+            "Vipers",
+            "VPs",
+            IPFS_URI(),
+            Option::None,
+            Option::Some(1000),
+            Option::None,
+            Option::None,
+            0,
+        );
 }
 
 #[test]
@@ -110,6 +143,8 @@ fn test_create_club_with_zero_entry_fee() {
             Option::None,
             Option::Some(0),
             Option::Some(erc20_token.contract_address),
+            Option::None,
+            0,
         );
 }
 
@@ -126,6 +161,8 @@ fn test_create_club_with_invalid_payment_token() {
             Option::None,
             Option::Some(1000),
             Option::Some(ZERO_ADDRESS()),
+            Option::None,
+            0,
         );
 }
 
@@ -135,7 +172,9 @@ fn test_ip_club_nft_deployed_on_club_creation() {
 
     cheat_caller_address(ip_club.contract_address, CREATOR(), CheatSpan::TargetCalls(1));
     let club_id = ip_club
-        .create_club("Vipers", "VPs", IPFS_URI(), Option::None, Option::None, Option::None);
+        .create_club(
+            "Vipers", "VPs", IPFS_URI(), Option::None, Option::None, Option::None, Option::None, 0,
+        );
 
     let club_record = ip_club.get_club_record(club_id);
     let ip_club_nft = IIPClubNFTDispatcher { contract_address: club_record.club_nft };
@@ -153,7 +192,9 @@ fn test_close_and_reopen_club() {
 
     cheat_caller_address(ip_club.contract_address, CREATOR(), CheatSpan::TargetCalls(1));
     let club_id = ip_club
-        .create_club("Vipers", "VPs", IPFS_URI(), Option::None, Option::None, Option::None);
+        .create_club(
+            "Vipers", "VPs", IPFS_URI(), Option::None, Option::None, Option::None, Option::None, 0,
+        );
 
     cheat_caller_address(ip_club.contract_address, CREATOR(), CheatSpan::TargetCalls(1));
     ip_club.set_club_open(club_id, false);
@@ -173,7 +214,9 @@ fn test_only_club_creator_can_toggle_club() {
 
     cheat_caller_address(ip_club.contract_address, CREATOR(), CheatSpan::TargetCalls(1));
     let club_id = ip_club
-        .create_club("Vipers", "VPs", IPFS_URI(), Option::None, Option::None, Option::None);
+        .create_club(
+            "Vipers", "VPs", IPFS_URI(), Option::None, Option::None, Option::None, Option::None, 0,
+        );
 
     cheat_caller_address(ip_club.contract_address, USER1(), CheatSpan::TargetCalls(1));
     ip_club.set_club_open(club_id, false);
@@ -195,7 +238,9 @@ fn test_join_club_successfully() {
 
     cheat_caller_address(ip_club.contract_address, CREATOR(), CheatSpan::TargetCalls(1));
     let club_id = ip_club
-        .create_club("Vipers", "VPs", IPFS_URI(), Option::None, Option::None, Option::None);
+        .create_club(
+            "Vipers", "VPs", IPFS_URI(), Option::None, Option::None, Option::None, Option::None, 0,
+        );
 
     cheat_caller_address(ip_club.contract_address, member_1, CheatSpan::TargetCalls(1));
     ip_club.join_club(club_id);
@@ -219,7 +264,9 @@ fn test_join_club_mints_safe_membership_nft() {
 
     cheat_caller_address(ip_club.contract_address, CREATOR(), CheatSpan::TargetCalls(1));
     let club_id = ip_club
-        .create_club("Vipers", "VPs", IPFS_URI(), Option::None, Option::None, Option::None);
+        .create_club(
+            "Vipers", "VPs", IPFS_URI(), Option::None, Option::None, Option::None, Option::None, 0,
+        );
 
     cheat_caller_address(ip_club.contract_address, member, CheatSpan::TargetCalls(1));
     ip_club.join_club(club_id);
@@ -237,7 +284,9 @@ fn test_join_club_rejects_non_receiver_contract() {
 
     cheat_caller_address(ip_club.contract_address, CREATOR(), CheatSpan::TargetCalls(1));
     let club_id = ip_club
-        .create_club("Vipers", "VPs", IPFS_URI(), Option::None, Option::None, Option::None);
+        .create_club(
+            "Vipers", "VPs", IPFS_URI(), Option::None, Option::None, Option::None, Option::None, 0,
+        );
 
     cheat_caller_address(
         ip_club.contract_address, ip_club.contract_address, CheatSpan::TargetCalls(1),
@@ -259,6 +308,8 @@ fn test_join_club_with_entry_fee() {
             Option::None,
             Option::Some(1000),
             Option::Some(erc20_token.contract_address),
+            Option::None,
+            0,
         );
 
     mint_erc20(erc20_token.contract_address, member, 3000);
@@ -301,6 +352,8 @@ fn test_join_club_reentrant_payment_token_reverts_atomically() {
             Option::None,
             Option::Some(1000),
             Option::Some(reentrant_token),
+            Option::None,
+            0,
         );
 
     assert!(club_id == expected_club_id, "test token should target first club");
@@ -310,20 +363,27 @@ fn test_join_club_reentrant_payment_token_reverts_atomically() {
 }
 
 #[test]
-#[should_panic(expected: 'Already has nft')]
-fn test_cannot_join_club_twice() {
+fn test_join_club_twice_holds_two_cards() {
     let TestContracts { ip_club, .. } = initialize_contracts();
     let member = deploy_receiver();
 
     cheat_caller_address(ip_club.contract_address, CREATOR(), CheatSpan::TargetCalls(1));
     let club_id = ip_club
-        .create_club("Vipers", "VPs", IPFS_URI(), Option::None, Option::None, Option::None);
+        .create_club(
+            "Vipers", "VPs", IPFS_URI(), Option::None, Option::None, Option::None, Option::None, 0,
+        );
 
     cheat_caller_address(ip_club.contract_address, member, CheatSpan::TargetCalls(1));
     ip_club.join_club(club_id);
 
     cheat_caller_address(ip_club.contract_address, member, CheatSpan::TargetCalls(1));
     ip_club.join_club(club_id);
+
+    let club_record = ip_club.get_club_record(club_id);
+    let erc721 = IERC721Dispatcher { contract_address: club_record.club_nft };
+    assert!(erc721.balance_of(member) == 2, "member holds two cards");
+    assert!(club_record.num_members == 2, "two cards outstanding");
+    assert!(ip_club.is_member(club_id, member), "still a member");
 }
 
 #[test]
@@ -335,7 +395,16 @@ fn test_cannot_join_club_when_max_members_reached() {
 
     cheat_caller_address(ip_club.contract_address, CREATOR(), CheatSpan::TargetCalls(1));
     let club_id = ip_club
-        .create_club("Vipers", "VPs", IPFS_URI(), Option::Some(1), Option::None, Option::None);
+        .create_club(
+            "Vipers",
+            "VPs",
+            IPFS_URI(),
+            Option::Some(1),
+            Option::None,
+            Option::None,
+            Option::None,
+            0,
+        );
 
     cheat_caller_address(ip_club.contract_address, member_1, CheatSpan::TargetCalls(1));
     ip_club.join_club(club_id);
@@ -352,7 +421,16 @@ fn test_cannot_join_when_club_is_closed() {
 
     cheat_caller_address(ip_club.contract_address, CREATOR(), CheatSpan::TargetCalls(1));
     let club_id = ip_club
-        .create_club("Vipers", "VPs", IPFS_URI(), Option::Some(1), Option::None, Option::None);
+        .create_club(
+            "Vipers",
+            "VPs",
+            IPFS_URI(),
+            Option::Some(1),
+            Option::None,
+            Option::None,
+            Option::None,
+            0,
+        );
 
     cheat_caller_address(ip_club.contract_address, CREATOR(), CheatSpan::TargetCalls(1));
     ip_club.set_club_open(club_id, false);
@@ -368,7 +446,16 @@ fn test_only_ip_club_can_mint() {
 
     cheat_caller_address(ip_club.contract_address, CREATOR(), CheatSpan::TargetCalls(1));
     let club_id = ip_club
-        .create_club("Vipers", "VPs", IPFS_URI(), Option::Some(1), Option::None, Option::None);
+        .create_club(
+            "Vipers",
+            "VPs",
+            IPFS_URI(),
+            Option::Some(1),
+            Option::None,
+            Option::None,
+            Option::None,
+            0,
+        );
 
     let club_record = ip_club.get_club_record(club_id);
     let ip_club_nft = IIPClubNFTDispatcher { contract_address: club_record.club_nft };
@@ -386,7 +473,9 @@ fn test_membership_nft_is_non_transferable() {
 
     cheat_caller_address(ip_club.contract_address, CREATOR(), CheatSpan::TargetCalls(1));
     let club_id = ip_club
-        .create_club("Vipers", "VPs", IPFS_URI(), Option::None, Option::None, Option::None);
+        .create_club(
+            "Vipers", "VPs", IPFS_URI(), Option::None, Option::None, Option::None, Option::None, 0,
+        );
 
     cheat_caller_address(ip_club.contract_address, member_1, CheatSpan::TargetCalls(1));
     ip_club.join_club(club_id);
@@ -406,7 +495,9 @@ fn test_supports_custom_interfaces() {
 
     cheat_caller_address(ip_club.contract_address, CREATOR(), CheatSpan::TargetCalls(1));
     let club_id = ip_club
-        .create_club("Vipers", "VPs", IPFS_URI(), Option::None, Option::None, Option::None);
+        .create_club(
+            "Vipers", "VPs", IPFS_URI(), Option::None, Option::None, Option::None, Option::None, 0,
+        );
 
     let club_record = ip_club.get_club_record(club_id);
     let nft_src5 = ISRC5Dispatcher { contract_address: club_record.club_nft };
@@ -420,7 +511,16 @@ fn test_leave_club_frees_seat_and_membership() {
 
     cheat_caller_address(ip_club.contract_address, CREATOR(), CheatSpan::TargetCalls(1));
     let club_id = ip_club
-        .create_club("Vipers", "VPs", IPFS_URI(), Option::Some(1), Option::None, Option::None);
+        .create_club(
+            "Vipers",
+            "VPs",
+            IPFS_URI(),
+            Option::Some(1),
+            Option::None,
+            Option::None,
+            Option::None,
+            0,
+        );
 
     cheat_caller_address(ip_club.contract_address, member, CheatSpan::TargetCalls(1));
     ip_club.join_club(club_id);
@@ -450,7 +550,9 @@ fn test_leave_club_allowed_when_closed() {
 
     cheat_caller_address(ip_club.contract_address, CREATOR(), CheatSpan::TargetCalls(1));
     let club_id = ip_club
-        .create_club("Vipers", "VPs", IPFS_URI(), Option::None, Option::None, Option::None);
+        .create_club(
+            "Vipers", "VPs", IPFS_URI(), Option::None, Option::None, Option::None, Option::None, 0,
+        );
 
     cheat_caller_address(ip_club.contract_address, member, CheatSpan::TargetCalls(1));
     ip_club.join_club(club_id);
@@ -476,7 +578,9 @@ fn test_leave_club_rejects_foreign_token() {
 
     cheat_caller_address(ip_club.contract_address, CREATOR(), CheatSpan::TargetCalls(1));
     let club_id = ip_club
-        .create_club("Vipers", "VPs", IPFS_URI(), Option::None, Option::None, Option::None);
+        .create_club(
+            "Vipers", "VPs", IPFS_URI(), Option::None, Option::None, Option::None, Option::None, 0,
+        );
 
     cheat_caller_address(ip_club.contract_address, member, CheatSpan::TargetCalls(1));
     ip_club.join_club(club_id);
@@ -497,7 +601,9 @@ fn test_only_registry_can_burn() {
 
     cheat_caller_address(ip_club.contract_address, CREATOR(), CheatSpan::TargetCalls(1));
     let club_id = ip_club
-        .create_club("Vipers", "VPs", IPFS_URI(), Option::None, Option::None, Option::None);
+        .create_club(
+            "Vipers", "VPs", IPFS_URI(), Option::None, Option::None, Option::None, Option::None, 0,
+        );
 
     cheat_caller_address(ip_club.contract_address, member, CheatSpan::TargetCalls(1));
     ip_club.join_club(club_id);
@@ -517,7 +623,9 @@ fn test_reopened_club_accepts_joins() {
 
     cheat_caller_address(ip_club.contract_address, CREATOR(), CheatSpan::TargetCalls(1));
     let club_id = ip_club
-        .create_club("Vipers", "VPs", IPFS_URI(), Option::None, Option::None, Option::None);
+        .create_club(
+            "Vipers", "VPs", IPFS_URI(), Option::None, Option::None, Option::None, Option::None, 0,
+        );
 
     cheat_caller_address(ip_club.contract_address, CREATOR(), CheatSpan::TargetCalls(1));
     ip_club.set_club_open(club_id, false);
@@ -527,4 +635,293 @@ fn test_reopened_club_accepts_joins() {
     cheat_caller_address(ip_club.contract_address, member, CheatSpan::TargetCalls(1));
     ip_club.join_club(club_id);
     assert!(ip_club.is_member(club_id, member), "join after reopen");
+}
+
+#[test]
+fn test_vested_card_transfers_after_lock() {
+    let TestContracts { ip_club, .. } = initialize_contracts();
+    let member = deploy_receiver();
+    let collector = deploy_receiver();
+
+    cheat_caller_address(ip_club.contract_address, CREATOR(), CheatSpan::TargetCalls(1));
+    let club_id = ip_club
+        .create_club(
+            "Vipers",
+            "VPs",
+            IPFS_URI(),
+            Option::None,
+            Option::None,
+            Option::None,
+            Option::Some(1000),
+            500,
+        );
+
+    cheat_caller_address(ip_club.contract_address, member, CheatSpan::TargetCalls(1));
+    ip_club.join_club(club_id);
+
+    let club_record = ip_club.get_club_record(club_id);
+    let ip_club_nft = IIPClubNFTDispatcher { contract_address: club_record.club_nft };
+    let erc721 = IERC721Dispatcher { contract_address: club_record.club_nft };
+    let token_id = ip_club_nft.get_last_minted_id();
+
+    // minted_at is 0 (default test timestamp); unlocks_at = 0 + 1000 = 1000.
+    cheat_block_timestamp(club_record.club_nft, 1000, CheatSpan::TargetCalls(1));
+    cheat_caller_address(club_record.club_nft, member, CheatSpan::TargetCalls(1));
+    erc721.transfer_from(member, collector, token_id);
+
+    assert!(erc721.owner_of(token_id) == collector, "card should transfer once vested");
+    assert!(ip_club.is_member(club_id, collector), "collector becomes a member");
+}
+
+#[test]
+#[should_panic(expected: 'Membership still vesting')]
+fn test_vesting_blocks_early_transfer() {
+    let TestContracts { ip_club, .. } = initialize_contracts();
+    let member = deploy_receiver();
+    let collector = deploy_receiver();
+
+    cheat_caller_address(ip_club.contract_address, CREATOR(), CheatSpan::TargetCalls(1));
+    let club_id = ip_club
+        .create_club(
+            "Vipers",
+            "VPs",
+            IPFS_URI(),
+            Option::None,
+            Option::None,
+            Option::None,
+            Option::Some(1000),
+            0,
+        );
+
+    cheat_caller_address(ip_club.contract_address, member, CheatSpan::TargetCalls(1));
+    ip_club.join_club(club_id);
+
+    let club_record = ip_club.get_club_record(club_id);
+    let ip_club_nft = IIPClubNFTDispatcher { contract_address: club_record.club_nft };
+    let erc721 = IERC721Dispatcher { contract_address: club_record.club_nft };
+    let token_id = ip_club_nft.get_last_minted_id();
+
+    // minted_at is 0 (default test timestamp); unlocks_at = 0 + 1000 = 1000,
+    // so 999 must still panic.
+    cheat_block_timestamp(club_record.club_nft, 999, CheatSpan::TargetCalls(1));
+    cheat_caller_address(club_record.club_nft, member, CheatSpan::TargetCalls(1));
+    erc721.transfer_from(member, collector, token_id);
+}
+
+#[test]
+#[should_panic(expected: 'Membership is non-transferable')]
+fn test_none_lock_is_permanently_soulbound() {
+    let TestContracts { ip_club, .. } = initialize_contracts();
+    let member = deploy_receiver();
+    let collector = deploy_receiver();
+
+    cheat_caller_address(ip_club.contract_address, CREATOR(), CheatSpan::TargetCalls(1));
+    let club_id = ip_club
+        .create_club(
+            "Vipers", "VPs", IPFS_URI(), Option::None, Option::None, Option::None, Option::None, 0,
+        );
+
+    cheat_caller_address(ip_club.contract_address, member, CheatSpan::TargetCalls(1));
+    ip_club.join_club(club_id);
+
+    let club_record = ip_club.get_club_record(club_id);
+    let ip_club_nft = IIPClubNFTDispatcher { contract_address: club_record.club_nft };
+    let erc721 = IERC721Dispatcher { contract_address: club_record.club_nft };
+    let token_id = ip_club_nft.get_last_minted_id();
+
+    cheat_block_timestamp(club_record.club_nft, 10_000_000, CheatSpan::TargetCalls(1));
+    cheat_caller_address(club_record.club_nft, member, CheatSpan::TargetCalls(1));
+    erc721.transfer_from(member, collector, token_id);
+}
+
+#[test]
+fn test_leave_club_works_while_vesting() {
+    let TestContracts { ip_club, .. } = initialize_contracts();
+    let member = deploy_receiver();
+
+    cheat_caller_address(ip_club.contract_address, CREATOR(), CheatSpan::TargetCalls(1));
+    let club_id = ip_club
+        .create_club(
+            "Vipers",
+            "VPs",
+            IPFS_URI(),
+            Option::None,
+            Option::None,
+            Option::None,
+            Option::Some(1_000_000),
+            0,
+        );
+
+    cheat_caller_address(ip_club.contract_address, member, CheatSpan::TargetCalls(1));
+    ip_club.join_club(club_id);
+
+    let club_record = ip_club.get_club_record(club_id);
+    let ip_club_nft = IIPClubNFTDispatcher { contract_address: club_record.club_nft };
+    let token_id = ip_club_nft.get_last_minted_id();
+
+    cheat_caller_address(ip_club.contract_address, member, CheatSpan::TargetCalls(1));
+    ip_club.leave_club(club_id, token_id);
+
+    assert!(!ip_club.is_member(club_id, member), "leave works despite vesting");
+    assert!(ip_club.get_club_record(club_id).num_members == 0, "seat freed");
+}
+
+#[test]
+fn test_royalty_info() {
+    let TestContracts { ip_club, .. } = initialize_contracts();
+    let member = deploy_receiver();
+
+    cheat_caller_address(ip_club.contract_address, CREATOR(), CheatSpan::TargetCalls(1));
+    let club_id = ip_club
+        .create_club(
+            "Vipers",
+            "VPs",
+            IPFS_URI(),
+            Option::None,
+            Option::None,
+            Option::None,
+            Option::None,
+            500,
+        );
+
+    cheat_caller_address(ip_club.contract_address, member, CheatSpan::TargetCalls(1));
+    ip_club.join_club(club_id);
+
+    let club_record = ip_club.get_club_record(club_id);
+    let ip_club_nft = IIPClubNFTDispatcher { contract_address: club_record.club_nft };
+    let token_id = ip_club_nft.get_last_minted_id();
+
+    let (recipient, amount) = ip_club_nft.royalty_info(token_id, 10_000);
+    assert!(recipient == CREATOR(), "royalty goes to club creator");
+    assert!(amount == 500, "5% of 10000");
+}
+
+#[test]
+fn test_two_wallets_hold_vested_cards_from_same_club() {
+    let TestContracts { ip_club, .. } = initialize_contracts();
+    let member_1 = deploy_receiver();
+    let member_2 = deploy_receiver();
+    let collector = deploy_receiver();
+
+    cheat_caller_address(ip_club.contract_address, CREATOR(), CheatSpan::TargetCalls(1));
+    let club_id = ip_club
+        .create_club(
+            "Vipers",
+            "VPs",
+            IPFS_URI(),
+            Option::None,
+            Option::None,
+            Option::None,
+            Option::Some(0),
+            0,
+        );
+
+    cheat_caller_address(ip_club.contract_address, member_1, CheatSpan::TargetCalls(1));
+    ip_club.join_club(club_id);
+    cheat_caller_address(ip_club.contract_address, member_2, CheatSpan::TargetCalls(1));
+    ip_club.join_club(club_id);
+
+    let club_record = ip_club.get_club_record(club_id);
+    let ip_club_nft = IIPClubNFTDispatcher { contract_address: club_record.club_nft };
+    let erc721 = IERC721Dispatcher { contract_address: club_record.club_nft };
+    let token_1 = 1;
+    let token_2 = ip_club_nft.get_last_minted_id();
+
+    cheat_caller_address(club_record.club_nft, member_1, CheatSpan::TargetCalls(1));
+    erc721.transfer_from(member_1, collector, token_1);
+    cheat_caller_address(club_record.club_nft, member_2, CheatSpan::TargetCalls(1));
+    erc721.transfer_from(member_2, collector, token_2);
+
+    assert!(erc721.balance_of(collector) == 2, "collector holds both vested cards");
+}
+
+#[test]
+fn test_supports_licensed_and_erc2981_interfaces() {
+    let TestContracts { ip_club, .. } = initialize_contracts();
+
+    cheat_caller_address(ip_club.contract_address, CREATOR(), CheatSpan::TargetCalls(1));
+    let club_id = ip_club
+        .create_club(
+            "Vipers", "VPs", IPFS_URI(), Option::None, Option::None, Option::None, Option::None, 0,
+        );
+
+    let club_record = ip_club.get_club_record(club_id);
+    let src5 = ISRC5Dispatcher { contract_address: club_record.club_nft };
+    assert!(src5.supports_interface(ILICENSED_COLLECTION_ID), "licensed marker");
+    assert!(src5.supports_interface(IERC2981_ID), "erc2981 marker");
+}
+
+#[test]
+fn test_token_uri_returns_club_document() {
+    let TestContracts { ip_club, .. } = initialize_contracts();
+    let member = deploy_receiver();
+
+    cheat_caller_address(ip_club.contract_address, CREATOR(), CheatSpan::TargetCalls(1));
+    let club_id = ip_club
+        .create_club(
+            "Vipers", "VPs", IPFS_URI(), Option::None, Option::None, Option::None, Option::None, 0,
+        );
+
+    cheat_caller_address(ip_club.contract_address, member, CheatSpan::TargetCalls(1));
+    ip_club.join_club(club_id);
+
+    let club_record = ip_club.get_club_record(club_id);
+    let nft_meta = IERC721MetadataDispatcher { contract_address: club_record.club_nft };
+    assert!(nft_meta.token_uri(1) == IPFS_URI(), "token_uri should be the club document exactly");
+}
+
+#[test]
+fn test_version_views() {
+    let TestContracts { ip_club, .. } = initialize_contracts();
+
+    cheat_caller_address(ip_club.contract_address, CREATOR(), CheatSpan::TargetCalls(1));
+    let club_id = ip_club
+        .create_club(
+            "Vipers", "VPs", IPFS_URI(), Option::None, Option::None, Option::None, Option::None, 0,
+        );
+    let club_record = ip_club.get_club_record(club_id);
+    let ip_club_nft = IIPClubNFTDispatcher { contract_address: club_record.club_nft };
+
+    assert!(ip_club.version() == "2.0.0", "registry version");
+    assert!(ip_club_nft.version() == "2.0.0", "nft version");
+}
+
+#[test]
+fn test_new_club_created_event_carries_vesting_and_royalty_terms() {
+    let TestContracts { ip_club, .. } = initialize_contracts();
+
+    cheat_caller_address(ip_club.contract_address, CREATOR(), CheatSpan::TargetCalls(1));
+    let mut spy = spy_events();
+    let club_id = ip_club
+        .create_club(
+            "Vipers",
+            "VPs",
+            IPFS_URI(),
+            Option::None,
+            Option::None,
+            Option::None,
+            Option::Some(1000),
+            500,
+        );
+
+    let club_record = ip_club.get_club_record(club_id);
+    spy
+        .assert_emitted(
+            @array![
+                (
+                    ip_club.contract_address,
+                    Event::NewClubCreated(
+                        NewClubCreated {
+                            club_id,
+                            creator: CREATOR(),
+                            club_nft: club_record.club_nft,
+                            metadata_uri: IPFS_URI(),
+                            transfer_lock: Option::Some(1000),
+                            royalty_bps: 500,
+                            timestamp: 0,
+                        },
+                    ),
+                ),
+            ],
+        );
 }

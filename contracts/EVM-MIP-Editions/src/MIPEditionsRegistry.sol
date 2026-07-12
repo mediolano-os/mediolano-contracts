@@ -34,18 +34,16 @@ contract MIPEditionsRegistry {
         _collectionImplementation = implementation_;
     }
 
-    /// Deploys a new edition collection owned by the caller. `royaltyBps` sets
-    /// the collection's ERC-2981 default royalty with the caller as receiver
-    /// (0 = no royalty).
+    /// Deploys a new edition collection owned by the caller. Royalties start
+    /// at zero and are owner-managed on the collection.
     function createCollection(
         string calldata name_,
         string calldata symbol_,
-        string calldata baseUri_,
-        uint96 royaltyBps
+        string calldata baseUri_
     ) external returns (uint256 collectionId, address collection) {
         collectionId = ++_collectionCount;
         collection = Clones.clone(_collectionImplementation);
-        MIPEditionCollection(collection).initialize(collectionId, msg.sender, name_, symbol_, baseUri_, royaltyBps);
+        MIPEditionCollection(collection).initialize(collectionId, msg.sender, name_, symbol_, baseUri_);
         _collections[collectionId] = CollectionRecord({collection: collection, creator: msg.sender});
         emit CollectionCreated(collectionId, collection, msg.sender, name_, symbol_, baseUri_);
     }

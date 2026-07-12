@@ -4,8 +4,9 @@
 // (any ERC-721 — the asset layer is the registry; this contract keeps none).
 // Sponsors signal bids (allowance-based — no escrow, the contract never holds
 // funds); the author accepts one, payment settles sponsor → author directly,
-// and a license record is issued. An issued license cannot be revoked by
-// anyone — it runs to its expiry. No contract owner, no admin, no fee.
+// and a license is minted as a standard ERC-721 on IPSponsorshipLicense. An
+// issued license cannot be revoked by anyone — it runs to its expiry. No
+// contract owner, no admin, no fee.
 #[starknet::contract]
 pub mod IPSponsorship {
     use core::num::traits::Zero;
@@ -16,8 +17,11 @@ pub mod IPSponsorship {
         Map, StoragePathEntry, StoragePointerReadAccess, StoragePointerWriteAccess,
     };
     use starknet::{ContractAddress, get_block_timestamp, get_caller_address};
-    use crate::interface::{IIPSponsorship, IIP_SPONSORSHIP_ID};
-    use crate::types::{License, SponsorshipOffer, bytearray_starts_with};
+    use crate::interface::{
+        IIPSponsorship, IIPSponsorshipLicenseDispatcher, IIPSponsorshipLicenseDispatcherTrait,
+        IIP_SPONSORSHIP_ID,
+    };
+    use crate::types::{LicenseData, SponsorshipOffer, bytearray_starts_with};
 
     component!(path: SRC5Component, storage: src5, event: SRC5Event);
 
@@ -29,14 +33,15 @@ pub mod IPSponsorship {
     struct Storage {
         #[substorage(v0)]
         src5: SRC5Component::Storage,
+        /// The IPSponsorshipLicense ERC-721 this registry mints on
+        /// acceptance. Set at construction; immutable.
+        license_contract: ContractAddress,
         last_offer_id: u256,
-        last_license_id: u256,
         offers: Map<u256, SponsorshipOffer>,
         // offer_id → sponsor → current bid amount (0 = no standing bid).
         // One standing bid per sponsor per offer; rebidding overwrites.
         // History lives in events; no enumerable bid lists on-chain.
         bids: Map<(u256, ContractAddress), u256>,
-        licenses: Map<u256, License>,
     }
 
     #[event]
@@ -49,7 +54,6 @@ pub mod IPSponsorship {
         BidPlaced: BidPlaced,
         BidRetracted: BidRetracted,
         SponsorshipAccepted: SponsorshipAccepted,
-        LicenseTransferred: LicenseTransferred,
     }
 
     #[derive(Drop, starknet::Event)]
@@ -66,6 +70,7 @@ pub mod IPSponsorship {
         pub payment_token: ContractAddress,
         pub license_terms_uri: ByteArray,
         pub transferable: bool,
+        pub royalty_bps: u256,
         pub specific_sponsor: Option<ContractAddress>,
         pub created_at: u64,
     }
@@ -110,20 +115,11 @@ pub mod IPSponsorship {
         pub expires_at: u64,
     }
 
-    #[derive(Drop, starknet::Event)]
-    pub struct LicenseTransferred {
-        #[key]
-        pub license_id: u256,
-        #[key]
-        pub from: ContractAddress,
-        #[key]
-        pub to: ContractAddress,
-        pub transferred_at: u64,
-    }
-
     #[constructor]
-    fn constructor(ref self: ContractState) {
+    fn constructor(ref self: ContractState, license_contract: ContractAddress) {
+        assert(!license_contract.is_zero(), 'License contract is zero');
         self.src5.register_interface(IIP_SPONSORSHIP_ID);
+        self.license_contract.write(license_contract);
     }
 
     #[abi(embed_v0)]
@@ -137,6 +133,7 @@ pub mod IPSponsorship {
             payment_token: ContractAddress,
             license_terms_uri: ByteArray,
             transferable: bool,
+            royalty_bps: u256,
             specific_sponsor: Option<ContractAddress>,
         ) -> u256 {
             let author = get_caller_address();
@@ -144,6 +141,7 @@ pub mod IPSponsorship {
             assert(duration > 0, 'Duration cannot be zero');
             assert(!payment_token.is_zero(), 'Payment token is zero');
             assert(!nft_contract.is_zero(), 'NFT contract is zero');
+            assert(royalty_bps <= 10000, 'Royalty exceeds 10000');
 
             // License terms must be content-addressed so the agreement stays
             // verifiable independently of any gateway (Berne-aligned record).
@@ -172,6 +170,7 @@ pub mod IPSponsorship {
                 transferable,
                 specific_sponsor,
                 open: true,
+                royalty_bps,
             };
 
             self.offers.entry(offer_id).write(offer);
@@ -189,6 +188,7 @@ pub mod IPSponsorship {
                         payment_token,
                         license_terms_uri,
                         transferable,
+                        royalty_bps,
                         specific_sponsor,
                         created_at: get_block_timestamp(),
                     },
@@ -263,31 +263,32 @@ pub mod IPSponsorship {
 
             let now = get_block_timestamp();
             let expires_at = now + offer.duration;
-            let license_id = self.last_license_id.read() + 1;
 
-            let license = License {
-                author: caller,
-                sponsor,
-                nft_contract: offer.nft_contract,
-                token_id: offer.token_id,
-                amount_paid: amount,
-                expires_at,
-                transferable: offer.transferable,
-                license_terms_uri: offer.license_terms_uri.clone(),
-            };
-
-            // Effects before the payment interaction: offer closes, the
-            // accepted bid is consumed, the license is recorded.
+            // Effects before interactions: the offer closes and the accepted
+            // bid is consumed before any external call.
             offer.open = false;
             let payment_token = offer.payment_token;
+            let license_data = LicenseData {
+                author: caller,
+                asset_contract: offer.nft_contract,
+                asset_token_id: offer.token_id,
+                expires_at,
+                transferable: offer.transferable,
+                royalty_bps: offer.royalty_bps,
+                license_terms_uri: offer.license_terms_uri.clone(),
+            };
             self.offers.entry(offer_id).write(offer);
             self.bids.entry((offer_id, sponsor)).write(0);
-            self.licenses.entry(license_id).write(license);
-            self.last_license_id.write(license_id);
+
+            // The license is a standard ERC-721 minted to the sponsor.
+            let license_nft = IIPSponsorshipLicenseDispatcher {
+                contract_address: self.license_contract.read(),
+            };
+            let license_id = license_nft.mint(sponsor, license_data);
 
             // Settlement: sponsor → author directly, against the allowance
             // the sponsor holds open. No escrow — a failing transfer reverts
-            // the whole acceptance atomically.
+            // the whole acceptance atomically, including the mint.
             let token = IERC20Dispatcher { contract_address: payment_token };
             let result = token.transfer_from(sponsor, caller, amount);
             assert(result, 'Token Transfer Failed');
@@ -302,27 +303,6 @@ pub mod IPSponsorship {
             license_id
         }
 
-        fn transfer_license(ref self: ContractState, license_id: u256, to: ContractAddress) {
-            let caller = get_caller_address();
-            assert(!to.is_zero(), 'Recipient is zero address');
-
-            let mut license = self.licenses.entry(license_id).read();
-            assert(!license.author.is_zero(), 'License does not exist');
-            assert(license.sponsor == caller, 'Only license holder');
-            assert(license.transferable, 'License not transferable');
-            assert(license.expires_at >= get_block_timestamp(), 'License expired');
-
-            license.sponsor = to;
-            self.licenses.entry(license_id).write(license);
-
-            self
-                .emit(
-                    LicenseTransferred {
-                        license_id, from: caller, to, transferred_at: get_block_timestamp(),
-                    },
-                );
-        }
-
         fn get_offer(self: @ContractState, offer_id: u256) -> SponsorshipOffer {
             let offer = self.offers.entry(offer_id).read();
             assert(!offer.author.is_zero(), 'Offer does not exist');
@@ -333,15 +313,18 @@ pub mod IPSponsorship {
             self.bids.entry((offer_id, sponsor)).read()
         }
 
-        fn get_license(self: @ContractState, license_id: u256) -> License {
-            let license = self.licenses.entry(license_id).read();
-            assert(!license.author.is_zero(), 'License does not exist');
-            license
+        fn get_license(self: @ContractState, license_id: u256) -> LicenseData {
+            let license_nft = IIPSponsorshipLicenseDispatcher {
+                contract_address: self.license_contract.read(),
+            };
+            license_nft.get_license_data(license_id)
         }
 
         fn is_license_valid(self: @ContractState, license_id: u256) -> bool {
-            let license = self.licenses.entry(license_id).read();
-            !license.author.is_zero() && license.expires_at >= get_block_timestamp()
+            let license_nft = IIPSponsorshipLicenseDispatcher {
+                contract_address: self.license_contract.read(),
+            };
+            license_nft.is_license_valid(license_id)
         }
 
         fn get_last_offer_id(self: @ContractState) -> u256 {
@@ -349,7 +332,18 @@ pub mod IPSponsorship {
         }
 
         fn get_last_license_id(self: @ContractState) -> u256 {
-            self.last_license_id.read()
+            let license_nft = IIPSponsorshipLicenseDispatcher {
+                contract_address: self.license_contract.read(),
+            };
+            license_nft.last_license_id()
+        }
+
+        fn get_license_contract(self: @ContractState) -> ContractAddress {
+            self.license_contract.read()
+        }
+
+        fn version(self: @ContractState) -> ByteArray {
+            "2.0.0"
         }
     }
 }

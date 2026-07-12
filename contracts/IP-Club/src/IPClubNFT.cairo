@@ -3,19 +3,26 @@ pub mod IPClubNFT {
     use ERC721Component::InternalTrait;
     use core::num::traits::Zero;
     use openzeppelin_introspection::src5::SRC5Component;
+    use openzeppelin_token::common::erc2981::interface::IERC2981_ID;
     use openzeppelin_token::erc721::ERC721Component;
+    use openzeppelin_token::erc721::interface::{IERC721Metadata, IERC721MetadataCamelOnly};
     use starknet::storage::{
-        StorageMapReadAccess, StoragePointerReadAccess, StoragePointerWriteAccess,
+        Map, StorageMapReadAccess, StorageMapWriteAccess, StoragePointerReadAccess,
+        StoragePointerWriteAccess,
     };
-    use starknet::{ContractAddress, get_caller_address};
+    use starknet::{ContractAddress, get_block_timestamp, get_caller_address};
 
     component!(path: ERC721Component, storage: erc721, event: ERC721Event);
     component!(path: SRC5Component, storage: src5, event: SRC5Event);
-    use crate::interfaces::IIPClubNFT::{IIPClubNFT, IIP_CLUB_NFT_ID};
+    use crate::interfaces::IIPClubNFT::{IIPClubNFT, IIP_CLUB_NFT_ID, ILICENSED_COLLECTION_ID};
     use crate::types::bytearray_starts_with;
 
     #[abi(embed_v0)]
-    impl ERC721MixinImpl = ERC721Component::ERC721MixinImpl<ContractState>;
+    impl ERC721Impl = ERC721Component::ERC721Impl<ContractState>;
+    #[abi(embed_v0)]
+    impl ERC721CamelOnly = ERC721Component::ERC721CamelOnlyImpl<ContractState>;
+    #[abi(embed_v0)]
+    impl SRC5Impl = SRC5Component::SRC5Impl<ContractState>;
     impl ERC721InternalImpl = ERC721Component::InternalImpl<ContractState>;
     impl SRC5InternalImpl = SRC5Component::InternalImpl<ContractState>;
 
@@ -28,7 +35,11 @@ pub mod IPClubNFT {
         creator: ContractAddress, // Address of the NFT creator
         club_id: u256, // Club identifier
         ip_club_manager: ContractAddress, // Address of the IP club manager
-        last_token_id: u256 // Last minted token ID
+        last_token_id: u256, // Last minted token ID
+        metadata_uri: ByteArray, // The club's shared document (every card looks the same)
+        transfer_lock: Option<u64>, // None = permanently non-transferable
+        royalty_bps: u256,
+        minted_at: Map<u256, u64>,
     }
 
     #[event]
@@ -49,25 +60,34 @@ pub mod IPClubNFT {
         creator: ContractAddress,
         ip_club_manager: ContractAddress,
         metadata_uri: ByteArray,
+        transfer_lock: Option<u64>,
+        royalty_bps: u256,
     ) {
         assert(name.len() > 0, 'Name must not be empty');
         assert(symbol.len() > 0, 'Symbol must not be empty');
         assert(club_id > 0, 'Club id is zero');
         assert(!creator.is_zero(), 'Creator is zero address');
         assert(!ip_club_manager.is_zero(), 'Manager is zero address');
+        assert(royalty_bps <= 10000, 'Royalty exceeds 10000');
         let valid_uri = bytearray_starts_with(@metadata_uri, @"ipfs://")
             || bytearray_starts_with(@metadata_uri, @"ar://");
         assert(valid_uri, 'URI must be ipfs:// or ar://');
 
-        // Initialize ERC721 with name, symbol, and metadata URI
-        self.erc721.initializer(name, symbol, metadata_uri);
+        // Token URI is resolved from the club's own document, not OZ's
+        // base-URI concatenation (which would dangle a token id onto it).
+        self.erc721.initializer(name, symbol, "");
         self.src5.register_interface(IIP_CLUB_NFT_ID);
+        self.src5.register_interface(IERC2981_ID);
+        self.src5.register_interface(ILICENSED_COLLECTION_ID);
 
         // Store creator, manager, club ID, and reset last token ID
         self.creator.write(creator);
         self.ip_club_manager.write(ip_club_manager);
         self.last_token_id.write(0);
         self.club_id.write(club_id);
+        self.metadata_uri.write(metadata_uri);
+        self.transfer_lock.write(transfer_lock);
+        self.royalty_bps.write(royalty_bps);
     }
 
     impl ERC721HooksImpl of ERC721Component::ERC721HooksTrait<ContractState> {
@@ -79,7 +99,18 @@ pub mod IPClubNFT {
         ) {
             let contract_state = self.get_contract();
             let current_owner = contract_state.erc721.ERC721_owners.read(token_id);
-            assert(current_owner.is_zero() || to.is_zero(), 'Membership is non-transferable');
+            // Mints (owner not yet set) and burns (leave path) are always
+            // permitted; only member-to-member movement is vesting-gated.
+            if current_owner.is_zero() || to.is_zero() {
+                return;
+            }
+            match contract_state.transfer_lock.read() {
+                Option::None => { assert(false, 'Membership is non-transferable'); },
+                Option::Some(lock) => {
+                    let unlocks_at = contract_state.minted_at.read(token_id) + lock;
+                    assert(get_block_timestamp() >= unlocks_at, 'Membership still vesting');
+                },
+            }
         }
 
         fn after_update(
@@ -88,6 +119,30 @@ pub mod IPClubNFT {
             token_id: u256,
             auth: ContractAddress,
         ) {}
+    }
+
+    #[abi(embed_v0)]
+    impl ERC721MetadataImpl of IERC721Metadata<ContractState> {
+        fn name(self: @ContractState) -> ByteArray {
+            self.erc721.ERC721_name.read()
+        }
+
+        fn symbol(self: @ContractState) -> ByteArray {
+            self.erc721.ERC721_symbol.read()
+        }
+
+        fn token_uri(self: @ContractState, token_id: u256) -> ByteArray {
+            self.erc721._require_owned(token_id);
+            self.metadata_uri.read()
+        }
+    }
+
+    #[abi(embed_v0)]
+    impl ERC721MetadataCamelOnlyImpl of IERC721MetadataCamelOnly<ContractState> {
+        fn tokenURI(self: @ContractState, tokenId: u256) -> ByteArray {
+            self.erc721._require_owned(tokenId);
+            self.metadata_uri.read()
+        }
     }
 
     // Implementation of the IIPClubNFT interface
@@ -103,12 +158,9 @@ pub mod IPClubNFT {
             assert(get_caller_address() == self.ip_club_manager.read(), 'Not club manager');
             assert(!recipient.is_zero(), 'Recipient is zero address');
 
-            // Ensure recipient does not already own an NFT
-            let has_nft = self.has_nft(recipient);
-            assert(!has_nft, 'Already has nft');
-
             // Increment token ID and mint NFT
             let next_token_id = self.last_token_id.read() + 1;
+            self.minted_at.write(next_token_id, get_block_timestamp());
             self.erc721.safe_mint(recipient, next_token_id, array![].span());
             self.last_token_id.write(next_token_id);
         }
@@ -149,6 +201,24 @@ pub mod IPClubNFT {
         // Get last minted ID
         fn get_last_minted_id(self: @ContractState) -> u256 {
             self.last_token_id.read()
+        }
+
+        fn royalty_info(
+            self: @ContractState, token_id: u256, sale_price: u256,
+        ) -> (ContractAddress, u256) {
+            self.erc721._require_owned(token_id);
+            let amount = (sale_price * self.royalty_bps.read()) / 10000;
+            (self.creator.read(), amount)
+        }
+
+        fn royaltyInfo(
+            self: @ContractState, token_id: u256, sale_price: u256,
+        ) -> (ContractAddress, u256) {
+            self.royalty_info(token_id, sale_price)
+        }
+
+        fn version(self: @ContractState) -> ByteArray {
+            "2.0.0"
         }
     }
 }

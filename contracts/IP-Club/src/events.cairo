@@ -8,6 +8,8 @@ pub struct NewClubCreated {
     pub creator: ContractAddress,
     pub club_nft: ContractAddress,
     pub metadata_uri: ByteArray,
+    pub transfer_lock: Option<u64>,
+    pub royalty_bps: u256,
     pub timestamp: u64,
 }
 

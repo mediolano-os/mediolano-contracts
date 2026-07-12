@@ -15,6 +15,8 @@ pub trait IIPClub<TContractState> {
         max_members: Option<u32>,
         entry_fee: Option<u256>,
         payment_token: Option<ContractAddress>,
+        transfer_lock: Option<u64>,
+        royalty_bps: u256,
     ) -> u256;
     fn set_club_open(ref self: TContractState, club_id: u256, open: bool);
     fn join_club(ref self: TContractState, club_id: u256);
@@ -22,4 +24,5 @@ pub trait IIPClub<TContractState> {
     fn get_club_record(self: @TContractState, club_id: u256) -> ClubRecord;
     fn is_member(self: @TContractState, club_id: u256, user: ContractAddress) -> bool;
     fn get_last_club_id(self: @TContractState) -> u256;
+    fn version(self: @TContractState) -> ByteArray;
 }

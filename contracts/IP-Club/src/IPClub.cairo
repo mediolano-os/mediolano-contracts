@@ -1,7 +1,8 @@
-// IP-Club v2 — permissionless registry/factory for NFT-gated communities.
+// IP-Club — permissionless registry/factory for NFT-gated communities.
 //
 // Anyone can create a club; each club gets its own immutable IPClubNFT
-// membership contract (non-transferable, one per wallet). The registry has
+// membership contract (a card is transferable only after the club's vesting
+// lock, or never if none is set). The registry has
 // no owner, no admin, no upgrade path, and takes no fee — optional entry
 // fees flow directly from joiner to club creator. The creator's only lever
 // is `set_club_open`, which gates NEW joins; existing memberships and the
@@ -68,9 +69,12 @@ pub mod IPClub {
             max_members: Option<u32>,
             entry_fee: Option<u256>,
             payment_token: Option<ContractAddress>,
+            transfer_lock: Option<u64>,
+            royalty_bps: u256,
         ) -> u256 {
             assert(name.len() > 0, 'Name must not be empty');
             assert(symbol.len() > 0, 'Symbol must not be empty');
+            assert(royalty_bps <= 10000, 'Royalty exceeds 10000');
             let valid_uri = bytearray_starts_with(@metadata_uri, @"ipfs://")
                 || bytearray_starts_with(@metadata_uri, @"ar://");
             assert(valid_uri, 'URI must be ipfs:// or ar://');
@@ -111,6 +115,8 @@ pub mod IPClub {
                 creator,
                 ip_club_manager,
                 metadata_uri.clone(),
+                transfer_lock,
+                royalty_bps,
             )
                 .serialize(ref constructor_calldata);
 
@@ -127,6 +133,8 @@ pub mod IPClub {
                 max_members,
                 entry_fee,
                 payment_token,
+                transfer_lock,
+                royalty_bps,
             };
 
             self.clubs.entry(next_club_id).write(club_record);
@@ -139,6 +147,8 @@ pub mod IPClub {
                         creator,
                         club_nft: ip_club_nft_address,
                         metadata_uri,
+                        transfer_lock,
+                        royalty_bps,
                         timestamp: get_block_timestamp(),
                     },
                 );
@@ -165,10 +175,6 @@ pub mod IPClub {
             assert(!club_record.creator.is_zero(), 'Club does not exist');
             assert(club_record.open, 'Club not open');
 
-            // Membership uniqueness is enforced by the NFT itself
-            // ('Already has nft' in IPClubNFT.mint) — the asset-side check
-            // covers every caller, so the registry does not duplicate it
-            // with a second cross-contract call.
             if let Option::Some(max) = club_record.max_members {
                 assert(club_record.num_members < max, 'Club full');
             }
@@ -183,8 +189,7 @@ pub mod IPClub {
 
             // State is final before the external calls (checks-effects-
             // interactions); a reentrant call runs under its own caller
-            // context against consistent storage, and membership itself is
-            // guarded by the NFT's one-per-wallet invariant.
+            // context against consistent storage.
             if let Option::Some(fee) = entry_fee {
                 // create_club guarantees a paid club carries a non-zero
                 // payment token, and club fee terms are immutable.
@@ -236,6 +241,10 @@ pub mod IPClub {
 
         fn get_last_club_id(self: @ContractState) -> u256 {
             self.last_club_id.read()
+        }
+
+        fn version(self: @ContractState) -> ByteArray {
+            "2.0.0"
         }
     }
 }

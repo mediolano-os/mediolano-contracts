@@ -87,6 +87,8 @@ Each contract package is self-contained and has its own `Scarb.toml`. Some packa
 | `contracts/MIP-Openedition-ERC721a` | Open-edition ERC-721 issuance package. |
 | `contracts/IP-Bulk-Tokenization` | Batch IP tokenization flow for multiple ERC-721 mints. |
 | `contracts/IP-Colab-Collections` | Collaborative collection prototype. |
+| `contracts/Generative-Art-ERC721` | Permissionless, collector-minted ERC-721 for generative art. The generative script is anchored on-chain by its Poseidon hash and each token's seed is derived deterministically at mint. Fully immutable and zero-fee, with ERC-2981 royalties and a collection factory. |
+| `contracts/IP-Coin` | Prototype: interface for a factory deploying fungible IP coins bound to a post/work id (name, symbol, supply, decimals, metadata). Interface-only scaffold; no contract implementation yet. |
 
 ### Identity, Provenance, And Discovery
 

@@ -41,6 +41,9 @@
                 },
                 {
                   "string": "ipfs://1"
+                },
+                {
+                  "u32": 0
                 }
               ]
             }
@@ -133,7 +136,7 @@
           },
           "ext": "v0"
         },
-        "live_until": 4095
+        "live_until": 518400
       },
       {
         "entry": {
@@ -155,6 +158,77 @@
               "durability": "persistent",
               "val": {
                 "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAITA4"
+              }
+            }
+          },
+          "ext": "v0"
+        },
+        "live_until": 4095
+      },
+      {
+        "entry": {
+          "last_modified_ledger_seq": 0,
+          "data": {
+            "contract_data": {
+              "ext": "v0",
+              "contract": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAHK3M",
+              "key": {
+                "vec": [
+                  {
+                    "symbol": "TokenRegisteredAt"
+                  },
+                  {
+                    "u32": 1
+                  }
+                ]
+              },
+              "durability": "persistent",
+              "val": {
+                "u64": "0"
+              }
+            }
+          },
+          "ext": "v0"
+        },
+        "live_until": 4095
+      },
+      {
+        "entry": {
+          "last_modified_ledger_seq": 0,
+          "data": {
+            "contract_data": {
+              "ext": "v0",
+              "contract": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAHK3M",
+              "key": {
+                "vec": [
+                  {
+                    "symbol": "TokenRoyalty"
+                  },
+                  {
+                    "u32": 1
+                  }
+                ]
+              },
+              "durability": "persistent",
+              "val": {
+                "map": [
+                  {
+                    "key": {
+                      "symbol": "basis_points"
+                    },
+                    "val": {
+                      "u32": 0
+                    }
+                  },
+                  {
+                    "key": {
+                      "symbol": "receiver"
+                    },
+                    "val": {
+                      "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAITA4"
+                    }
+                  }
+                ]
               }
             }
           },

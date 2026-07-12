@@ -35,6 +35,16 @@
                       "string": "ipfs://2"
                     }
                   ]
+                },
+                {
+                  "vec": [
+                    {
+                      "u32": 100
+                    },
+                    {
+                      "u32": 250
+                    }
+                  ]
                 }
               ]
             }
@@ -43,6 +53,7 @@
         }
       ]
     ],
+    [],
     [],
     []
   ],
@@ -155,7 +166,7 @@
           },
           "ext": "v0"
         },
-        "live_until": 4095
+        "live_until": 518400
       },
       {
         "entry": {
@@ -237,6 +248,148 @@
           "ext": "v0"
         },
         "live_until": 4095
+      },
+      {
+        "entry": {
+          "last_modified_ledger_seq": 0,
+          "data": {
+            "contract_data": {
+              "ext": "v0",
+              "contract": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAHK3M",
+              "key": {
+                "vec": [
+                  {
+                    "symbol": "TokenRegisteredAt"
+                  },
+                  {
+                    "u32": 1
+                  }
+                ]
+              },
+              "durability": "persistent",
+              "val": {
+                "u64": "0"
+              }
+            }
+          },
+          "ext": "v0"
+        },
+        "live_until": 4095
+      },
+      {
+        "entry": {
+          "last_modified_ledger_seq": 0,
+          "data": {
+            "contract_data": {
+              "ext": "v0",
+              "contract": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAHK3M",
+              "key": {
+                "vec": [
+                  {
+                    "symbol": "TokenRegisteredAt"
+                  },
+                  {
+                    "u32": 2
+                  }
+                ]
+              },
+              "durability": "persistent",
+              "val": {
+                "u64": "0"
+              }
+            }
+          },
+          "ext": "v0"
+        },
+        "live_until": 4095
+      },
+      {
+        "entry": {
+          "last_modified_ledger_seq": 0,
+          "data": {
+            "contract_data": {
+              "ext": "v0",
+              "contract": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAHK3M",
+              "key": {
+                "vec": [
+                  {
+                    "symbol": "TokenRoyalty"
+                  },
+                  {
+                    "u32": 1
+                  }
+                ]
+              },
+              "durability": "persistent",
+              "val": {
+                "map": [
+                  {
+                    "key": {
+                      "symbol": "basis_points"
+                    },
+                    "val": {
+                      "u32": 100
+                    }
+                  },
+                  {
+                    "key": {
+                      "symbol": "receiver"
+                    },
+                    "val": {
+                      "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAFCT4"
+                    }
+                  }
+                ]
+              }
+            }
+          },
+          "ext": "v0"
+        },
+        "live_until": 4095
+      },
+      {
+        "entry": {
+          "last_modified_ledger_seq": 0,
+          "data": {
+            "contract_data": {
+              "ext": "v0",
+              "contract": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAHK3M",
+              "key": {
+                "vec": [
+                  {
+                    "symbol": "TokenRoyalty"
+                  },
+                  {
+                    "u32": 2
+                  }
+                ]
+              },
+              "durability": "persistent",
+              "val": {
+                "map": [
+                  {
+                    "key": {
+                      "symbol": "basis_points"
+                    },
+                    "val": {
+                      "u32": 250
+                    }
+                  },
+                  {
+                    "key": {
+                      "symbol": "receiver"
+                    },
+                    "val": {
+                      "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAFCT4"
+                    }
+                  }
+                ]
+              }
+            }
+          },
+          "ext": "v0"
+        },
+        "live_until": 518400
       },
       {
         "entry": {

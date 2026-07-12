@@ -35,15 +35,14 @@ impl MipRegistry {
         e.storage().instance().set(&DataKey::CollectionWasm, &collection_wasm);
     }
 
-    /// Deploys a new collection owned by the caller. `royalty_bps` sets the
-    /// collection's default royalty with the caller as receiver (0 = none).
+    /// Deploys a new collection owned by the caller. Royalties are per-token,
+    /// set at mint by the collection.
     pub fn create_collection(
         e: Env,
         creator: Address,
         name: String,
         symbol: String,
         base_uri: String,
-        royalty_bps: u32,
     ) -> (u64, Address) {
         creator.require_auth();
         let wasm: BytesN<32> = e
@@ -72,7 +71,6 @@ impl MipRegistry {
             name.clone(),
             symbol,
             base_uri,
-            royalty_bps,
         )
             .into_val(&e);
         let _: Val = e.invoke_contract(&address, &Symbol::new(&e, "initialize"), init_args);

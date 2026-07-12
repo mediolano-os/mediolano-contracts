@@ -21,6 +21,9 @@
                 },
                 {
                   "string": "ipfs://token/1"
+                },
+                {
+                  "u32": 0
                 }
               ]
             }
@@ -43,6 +46,9 @@
                 },
                 {
                   "string": "ipfs://token/2"
+                },
+                {
+                  "u32": 0
                 }
               ]
             }
@@ -186,7 +192,7 @@
           },
           "ext": "v0"
         },
-        "live_until": 4095
+        "live_until": 518400
       },
       {
         "entry": {
@@ -235,6 +241,148 @@
               "durability": "persistent",
               "val": {
                 "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAFCT4"
+              }
+            }
+          },
+          "ext": "v0"
+        },
+        "live_until": 4095
+      },
+      {
+        "entry": {
+          "last_modified_ledger_seq": 0,
+          "data": {
+            "contract_data": {
+              "ext": "v0",
+              "contract": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAHK3M",
+              "key": {
+                "vec": [
+                  {
+                    "symbol": "TokenRegisteredAt"
+                  },
+                  {
+                    "u32": 1
+                  }
+                ]
+              },
+              "durability": "persistent",
+              "val": {
+                "u64": "0"
+              }
+            }
+          },
+          "ext": "v0"
+        },
+        "live_until": 4095
+      },
+      {
+        "entry": {
+          "last_modified_ledger_seq": 0,
+          "data": {
+            "contract_data": {
+              "ext": "v0",
+              "contract": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAHK3M",
+              "key": {
+                "vec": [
+                  {
+                    "symbol": "TokenRegisteredAt"
+                  },
+                  {
+                    "u32": 2
+                  }
+                ]
+              },
+              "durability": "persistent",
+              "val": {
+                "u64": "0"
+              }
+            }
+          },
+          "ext": "v0"
+        },
+        "live_until": 4095
+      },
+      {
+        "entry": {
+          "last_modified_ledger_seq": 0,
+          "data": {
+            "contract_data": {
+              "ext": "v0",
+              "contract": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAHK3M",
+              "key": {
+                "vec": [
+                  {
+                    "symbol": "TokenRoyalty"
+                  },
+                  {
+                    "u32": 1
+                  }
+                ]
+              },
+              "durability": "persistent",
+              "val": {
+                "map": [
+                  {
+                    "key": {
+                      "symbol": "basis_points"
+                    },
+                    "val": {
+                      "u32": 0
+                    }
+                  },
+                  {
+                    "key": {
+                      "symbol": "receiver"
+                    },
+                    "val": {
+                      "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAFCT4"
+                    }
+                  }
+                ]
+              }
+            }
+          },
+          "ext": "v0"
+        },
+        "live_until": 4095
+      },
+      {
+        "entry": {
+          "last_modified_ledger_seq": 0,
+          "data": {
+            "contract_data": {
+              "ext": "v0",
+              "contract": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAHK3M",
+              "key": {
+                "vec": [
+                  {
+                    "symbol": "TokenRoyalty"
+                  },
+                  {
+                    "u32": 2
+                  }
+                ]
+              },
+              "durability": "persistent",
+              "val": {
+                "map": [
+                  {
+                    "key": {
+                      "symbol": "basis_points"
+                    },
+                    "val": {
+                      "u32": 0
+                    }
+                  },
+                  {
+                    "key": {
+                      "symbol": "receiver"
+                    },
+                    "val": {
+                      "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAFCT4"
+                    }
+                  }
+                ]
               }
             }
           },
@@ -321,35 +469,6 @@
                       },
                       "val": {
                         "u64": "1"
-                      }
-                    },
-                    {
-                      "key": {
-                        "vec": [
-                          {
-                            "symbol": "DefaultRoyalty"
-                          }
-                        ]
-                      },
-                      "val": {
-                        "map": [
-                          {
-                            "key": {
-                              "symbol": "basis_points"
-                            },
-                            "val": {
-                              "u32": 500
-                            }
-                          },
-                          {
-                            "key": {
-                              "symbol": "receiver"
-                            },
-                            "val": {
-                              "address": "CAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAFCT4"
-                            }
-                          }
-                        ]
                       }
                     },
                     {

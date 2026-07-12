@@ -22,14 +22,12 @@ fn create(
     env: &Env,
     client: &MipRegistryClient<'static>,
     creator: &Address,
-    royalty_bps: u32,
 ) -> (u64, Address) {
     client.create_collection(
         creator,
         &String::from_str(env, "My IP"),
         &String::from_str(env, "MIP"),
         &String::from_str(env, "ipfs://base/"),
-        &royalty_bps,
     )
 }
 
@@ -38,8 +36,8 @@ fn create_collection_is_permissionless_and_sequential() {
     let (env, client) = setup();
     let first = Address::generate(&env);
     let second = Address::generate(&env);
-    let (id_a, addr_a) = create(&env, &client, &first, 250);
-    let (id_b, addr_b) = create(&env, &client, &second, 0);
+    let (id_a, addr_a) = create(&env, &client, &first);
+    let (id_b, addr_b) = create(&env, &client, &second);
     assert_eq!(id_a, 1);
     assert_eq!(id_b, 2);
     assert!(addr_a != addr_b);
@@ -55,13 +53,13 @@ fn create_collection_is_permissionless_and_sequential() {
 fn created_collection_is_initialized_for_creator() {
     let (env, client) = setup();
     let creator = Address::generate(&env);
-    let (id, addr) = create(&env, &client, &creator, 250);
+    let (id, addr) = create(&env, &client, &creator);
     let c = MipCollectionClient::new(&env, &addr);
     assert_eq!(c.owner(), creator);
     assert_eq!(c.collection_id(), id);
     assert_eq!(c.registry(), client.address);
     assert_eq!(c.name(), String::from_str(&env, "My IP"));
-    let token_id = c.mint(&creator, &String::from_str(&env, "ipfs://a/1"));
+    let token_id = c.mint(&creator, &String::from_str(&env, "ipfs://a/1"), &250u32);
     assert_eq!(token_id, 1);
     let (receiver, amount) = c.royalty_info(&token_id, &10_000i128);
     assert_eq!(receiver, creator);
@@ -72,7 +70,7 @@ fn created_collection_is_initialized_for_creator() {
 fn registry_has_no_authority_over_collections() {
     let (env, client) = setup();
     let creator = Address::generate(&env);
-    let (_, addr) = create(&env, &client, &creator, 0);
+    let (_, addr) = create(&env, &client, &creator);
     let c = MipCollectionClient::new(&env, &addr);
     assert_eq!(c.owner(), creator);
     assert_eq!(client.version(), String::from_str(&env, "1.0.0"));

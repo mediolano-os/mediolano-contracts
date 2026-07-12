@@ -1,11 +1,7 @@
-pub mod IPClub;
-pub mod IPClubNFT;
-pub mod events;
+pub mod IPClubCollection;
+pub mod IPClubFactory;
+pub mod interface;
 pub mod types;
-pub mod interfaces {
-    pub mod IIPClub;
-    pub mod IIPClubNFT;
-}
 pub mod mocks {
     pub mod MockERC20;
     pub mod Receiver;

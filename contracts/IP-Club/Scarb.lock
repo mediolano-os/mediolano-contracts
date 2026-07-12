@@ -5,6 +5,7 @@ version = 1
 name = "ip_club"
 version = "0.1.0"
 dependencies = [
+ "openzeppelin_access",
  "openzeppelin_introspection",
  "openzeppelin_token",
  "openzeppelin_utils",

@@ -12,13 +12,13 @@ pub trait IReentrantPaymentToken<TContractState> {
 pub mod ReentrantPaymentToken {
     use starknet::ContractAddress;
     use starknet::storage::{StoragePointerReadAccess, StoragePointerWriteAccess};
-    use crate::interfaces::IIPClub::{IIPClubDispatcher, IIPClubDispatcherTrait};
+    use crate::interface::{IIPClubCollectionDispatcher, IIPClubCollectionDispatcherTrait};
     use crate::mocks::ReentrantPaymentToken::IReentrantPaymentToken;
 
     #[storage]
     struct Storage {
-        ip_club: ContractAddress,
-        club_id: u256,
+        club_collection: ContractAddress,
+        reentry_target: ContractAddress,
         attempted: bool,
     }
 
@@ -27,9 +27,11 @@ pub mod ReentrantPaymentToken {
     enum Event {}
 
     #[constructor]
-    fn constructor(ref self: ContractState, ip_club: ContractAddress, club_id: u256) {
-        self.ip_club.write(ip_club);
-        self.club_id.write(club_id);
+    fn constructor(
+        ref self: ContractState, club_collection: ContractAddress, reentry_target: ContractAddress,
+    ) {
+        self.club_collection.write(club_collection);
+        self.reentry_target.write(reentry_target);
     }
 
     #[abi(embed_v0)]
@@ -44,8 +46,10 @@ pub mod ReentrantPaymentToken {
             // token — bounds the attack to the realistic single nested call.
             if !self.attempted.read() {
                 self.attempted.write(true);
-                let ip_club = IIPClubDispatcher { contract_address: self.ip_club.read() };
-                ip_club.join_club(self.club_id.read());
+                let collection = IIPClubCollectionDispatcher {
+                    contract_address: self.club_collection.read(),
+                };
+                collection.mint(self.reentry_target.read());
             }
             true
         }

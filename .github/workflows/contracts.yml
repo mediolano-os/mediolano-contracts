@@ -27,9 +27,12 @@ jobs:
             BASE="${{ github.event.before }}"
             git cat-file -e "$BASE" 2>/dev/null || BASE="HEAD~1"
           fi
+          # Non-Cairo packages (EVM/Solana/Soroban) have no Scarb.toml and are
+          # skipped without failing the pipeline (set -e + pipefail would
+          # otherwise kill the job when the last changed dir is non-Cairo).
           DIRS=$(git diff --name-only "$BASE"...HEAD -- 'contracts/**' \
             | cut -d/ -f1-2 | sort -u \
-            | while read -r d; do [ -f "$d/Scarb.toml" ] && echo "$d"; done \
+            | while read -r d; do if [ -f "$d/Scarb.toml" ]; then echo "$d"; fi; done \
             | jq -R -s -c 'split("\n") | map(select(length > 0))')
           echo "dirs=${DIRS:-[]}" >> "$GITHUB_OUTPUT"
           echo "Changed contract dirs: ${DIRS:-[]}"

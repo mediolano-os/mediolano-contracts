@@ -3,41 +3,23 @@ use anchor_lang::prelude::*;
 declare_id!("C6vmifH7NSUttWfCREMUF5jGjFAn74aXT6pcSCowvpGq");
 
 /// IP collection issuance over Metaplex Core. Permissionless and zero-fee:
-/// anyone creates a collection, the creator owns it (collection authority and
-/// royalty beneficiary), and the registry records it under a sequential id
-/// while holding no rights over it.
+/// anyone creates a collection, the creator owns it, and the registry records
+/// it under a sequential id while holding no rights over it. Royalties are
+/// per-asset, written immutably at mint with the minting creator as sole
+/// beneficiary. An asset owner can permanently freeze (archive) their asset
+/// natively through Core by adding an immutable FreezeDelegate plugin.
 #[program]
 pub mod mip_collections {
     use super::*;
 
-    /// Creates a new Core collection owned by the caller, with the Core
-    /// Royalties plugin when `royalty_bps > 0` (creator as sole beneficiary).
-    pub fn create_collection(
-        ctx: Context<CreateCollection>,
-        name: String,
-        uri: String,
-        royalty_bps: u16,
-    ) -> Result<()> {
-        require!(royalty_bps <= 10_000, MipError::RoyaltyBpsTooHigh);
+    /// Creates a new Core collection owned by the caller.
+    pub fn create_collection(ctx: Context<CreateCollection>, name: String, uri: String) -> Result<()> {
+        require!(!name.is_empty() && name.len() <= 256, MipError::InvalidName);
+        require!(uri.len() <= 2048, MipError::InvalidUri);
 
         let counter = &mut ctx.accounts.registry_counter;
         counter.count = counter.count.checked_add(1).unwrap();
         let collection_id = counter.count;
-
-        let mut plugins: Vec<mpl_core::types::PluginAuthorityPair> = vec![];
-        if royalty_bps > 0 {
-            plugins.push(mpl_core::types::PluginAuthorityPair {
-                plugin: mpl_core::types::Plugin::Royalties(mpl_core::types::Royalties {
-                    basis_points: royalty_bps,
-                    creators: vec![mpl_core::types::Creator {
-                        address: ctx.accounts.creator.key(),
-                        percentage: 100,
-                    }],
-                    rule_set: mpl_core::types::RuleSet::None,
-                }),
-                authority: None,
-            });
-        }
 
         let mpl_core_program = ctx.accounts.mpl_core_program.to_account_info();
         let core_collection = ctx.accounts.core_collection.to_account_info();
@@ -51,7 +33,6 @@ pub mod mip_collections {
             .system_program(&system_program)
             .name(name.clone())
             .uri(uri.clone())
-            .plugins(plugins)
             .invoke()?;
 
         let record = &mut ctx.accounts.collection_record;
@@ -71,7 +52,33 @@ pub mod mip_collections {
 
     /// Mints a new asset into a collection. Core enforces that the signer is
     /// the collection's authority; the program holds no mint rights.
-    pub fn mint_asset(ctx: Context<MintAsset>, name: String, uri: String) -> Result<()> {
+    /// `royalty_bps` sets the asset's royalty, written as an immutable
+    /// Royalties plugin (authority None — no one can ever update it) with the
+    /// minting creator as sole beneficiary. The plugin is attached even at
+    /// zero so the creator's authorship is recorded on-chain per asset; the
+    /// registration timestamp is the mint transaction's block time.
+    pub fn mint_asset(
+        ctx: Context<MintAsset>,
+        name: String,
+        uri: String,
+        royalty_bps: u16,
+    ) -> Result<()> {
+        require!(!name.is_empty() && name.len() <= 256, MipError::InvalidName);
+        require!(!uri.is_empty() && uri.len() <= 2048, MipError::InvalidUri);
+        require!(royalty_bps <= 10_000, MipError::RoyaltyBpsTooHigh);
+
+        let plugins = vec![mpl_core::types::PluginAuthorityPair {
+            plugin: mpl_core::types::Plugin::Royalties(mpl_core::types::Royalties {
+                basis_points: royalty_bps,
+                creators: vec![mpl_core::types::Creator {
+                    address: ctx.accounts.authority.key(),
+                    percentage: 100,
+                }],
+                rule_set: mpl_core::types::RuleSet::None,
+            }),
+            authority: Some(mpl_core::types::PluginAuthority::None),
+        }];
+
         let mpl_core_program = ctx.accounts.mpl_core_program.to_account_info();
         let asset = ctx.accounts.asset.to_account_info();
         let core_collection = ctx.accounts.core_collection.to_account_info();
@@ -88,13 +95,16 @@ pub mod mip_collections {
             .system_program(&system_program)
             .name(name)
             .uri(uri.clone())
+            .plugins(plugins)
             .invoke()?;
 
         emit!(AssetMinted {
             core_collection: ctx.accounts.core_collection.key(),
             asset: ctx.accounts.asset.key(),
             owner: ctx.accounts.recipient.key(),
+            creator: ctx.accounts.authority.key(),
             uri,
+            royalty_bps,
         });
         Ok(())
     }
@@ -123,7 +133,9 @@ pub struct AssetMinted {
     pub core_collection: Pubkey,
     pub asset: Pubkey,
     pub owner: Pubkey,
+    pub creator: Pubkey,
     pub uri: String,
+    pub royalty_bps: u16,
 }
 
 #[derive(Accounts)]
@@ -180,4 +192,8 @@ pub struct CollectionCreated {
 pub enum MipError {
     #[msg("royalty basis points exceed 10000")]
     RoyaltyBpsTooHigh,
+    #[msg("name must be 1..=256 bytes")]
+    InvalidName,
+    #[msg("uri exceeds 2048 bytes or is empty where required")]
+    InvalidUri,
 }

@@ -27,7 +27,6 @@ fn create_collection_ix(
     core_collection: &Pubkey,
     name: &str,
     uri: &str,
-    royalty_bps: u16,
 ) -> Instruction {
     let (collection_record, _) = Pubkey::find_program_address(
         &[b"collection", core_collection.as_ref()],
@@ -47,7 +46,6 @@ fn create_collection_ix(
         data: mip_collections::instruction::CreateCollection {
             name: name.to_string(),
             uri: uri.to_string(),
-            royalty_bps,
         }
         .data(),
     }
@@ -57,15 +55,9 @@ fn send_create(
     svm: &mut LiteSVM,
     creator: &Keypair,
     core_collection: &Keypair,
-    royalty_bps: u16,
+    name: &str,
 ) -> Result<(), String> {
-    let ix = create_collection_ix(
-        &creator.pubkey(),
-        &core_collection.pubkey(),
-        "My IP",
-        "ipfs://col",
-        royalty_bps,
-    );
+    let ix = create_collection_ix(&creator.pubkey(), &core_collection.pubkey(), name, "ipfs://col");
     let tx = Transaction::new_signed_with_payer(
         &[ix],
         Some(&creator.pubkey()),
@@ -82,7 +74,7 @@ fn create_collection_records_and_creates_core_collection() {
     svm.airdrop(&creator.pubkey(), 10_000_000_000).unwrap();
     let core_collection = Keypair::new();
 
-    send_create(&mut svm, &creator, &core_collection, 500).unwrap();
+    send_create(&mut svm, &creator, &core_collection, "My IP").unwrap();
 
     // Core collection exists, owned by mpl-core, creator is update authority.
     let col_account = svm.get_account(&core_collection.pubkey()).unwrap();
@@ -92,17 +84,9 @@ fn create_collection_records_and_creates_core_collection() {
     assert_eq!(base.uri, "ipfs://col");
     assert_eq!(base.update_authority, creator.pubkey());
 
-    // Royalties plugin present with the creator as sole 100% beneficiary.
+    // Royalties are per-asset, written at mint — the collection carries none.
     let collection = mpl_core::Collection::from_bytes(&col_account.data).unwrap();
-    let royalties = collection
-        .plugin_list
-        .royalties
-        .expect("royalties plugin")
-        .royalties;
-    assert_eq!(royalties.basis_points, 500);
-    assert_eq!(royalties.creators.len(), 1);
-    assert_eq!(royalties.creators[0].address, creator.pubkey());
-    assert_eq!(royalties.creators[0].percentage, 100);
+    assert!(collection.plugin_list.royalties.is_none());
 
     // Registry record: id 1, creator + collection recorded.
     let (record_pda, _) = Pubkey::find_program_address(
@@ -129,8 +113,8 @@ fn create_collection_is_permissionless_and_sequential() {
     let col_a = Keypair::new();
     let col_b = Keypair::new();
 
-    send_create(&mut svm, &first, &col_a, 250).unwrap();
-    send_create(&mut svm, &second, &col_b, 0).unwrap();
+    send_create(&mut svm, &first, &col_a, "A").unwrap();
+    send_create(&mut svm, &second, &col_b, "B").unwrap();
 
     let record_pda = |col: &Pubkey| {
         Pubkey::find_program_address(&[b"collection", col.as_ref()], &program_id()).0
@@ -149,26 +133,13 @@ fn create_collection_is_permissionless_and_sequential() {
 }
 
 #[test]
-fn create_collection_rejects_royalty_over_100_pct() {
+fn create_collection_rejects_empty_name() {
     let mut svm = setup();
     let creator = Keypair::new();
     svm.airdrop(&creator.pubkey(), 10_000_000_000).unwrap();
     let core_collection = Keypair::new();
 
-    let err = send_create(&mut svm, &creator, &core_collection, 10_001).unwrap_err();
-    // Anchor error code 6000 is the first #[error_code] variant: RoyaltyBpsTooHigh.
-    assert!(err.contains("Custom(6000)"), "unexpected error: {err}");
-}
-
-#[test]
-fn create_collection_zero_royalty_has_no_plugin() {
-    let mut svm = setup();
-    let creator = Keypair::new();
-    svm.airdrop(&creator.pubkey(), 10_000_000_000).unwrap();
-    let core_collection = Keypair::new();
-
-    send_create(&mut svm, &creator, &core_collection, 0).unwrap();
-    let col_account = svm.get_account(&core_collection.pubkey()).unwrap();
-    let collection = mpl_core::Collection::from_bytes(&col_account.data).unwrap();
-    assert!(collection.plugin_list.royalties.is_none());
+    let err = send_create(&mut svm, &creator, &core_collection, "").unwrap_err();
+    // Anchor error code 6001 is the second #[error_code] variant: InvalidName.
+    assert!(err.contains("Custom(6001)"), "unexpected error: {err}");
 }

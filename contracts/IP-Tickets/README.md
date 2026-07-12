@@ -87,7 +87,7 @@ fn create_ticket_collection(
 ) -> u256; // owner only
 
 fn set_collection_active(collection_id: u256, active: bool); // owner only
-fn mint_ticket(collection_id: u256) -> u256;
+fn mint_ticket(collection_id: u256, recipient: ContractAddress) -> u256; // caller pays, recipient receives
 fn redeem_ticket(token_id: u256);
 
 fn has_valid_ticket(user: ContractAddress, collection_id: u256) -> bool;
@@ -96,16 +96,19 @@ fn get_ticket_data(token_id: u256) -> TicketData;
 fn get_ticket_collection_id(token_id: u256) -> u256;
 fn get_active_ticket_balance(user: ContractAddress, collection_id: u256) -> u256;
 fn get_last_collection_id() -> u256;
-fn total_supply() -> u256;
+fn total_minted() -> u256;
+fn version() -> ByteArray;
 fn royalty_info(token_id: u256, sale_price: u256) -> (ContractAddress, u256);
 fn royaltyInfo(token_id: u256, sale_price: u256) -> (ContractAddress, u256);
 ```
 
-Custom SRC5 interface IDs:
+Custom SRC5 interface IDs (the collection also registers `IERC2981_ID` and the
+`ILICENSED_COLLECTION_ID` programmable-license discovery marker):
 
 ```cairo
+// starknet_keccak("mediolano.ip-ticket-collection.v2")
 IIP_TICKET_COLLECTION_ID =
-0x329801ec79f9a18a441f490a55694aadd00b57e11fc1f2fc561b9bebc68e3d9
+0x1ef1511f39449df0a0c686da9bc0759e7c75ad8eb0da68c53ac14093a6ea757
 
 IIP_TICKET_COLLECTION_FACTORY_ID =
 0x27717c17c18e684321a4326345c6ee264d3a91a7b6f1b54e02de0332fb76f58

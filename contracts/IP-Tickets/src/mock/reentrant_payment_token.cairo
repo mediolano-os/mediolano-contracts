@@ -44,7 +44,7 @@ pub mod ReentrantPaymentToken {
             let ticket_collection = IIPTicketCollectionDispatcher {
                 contract_address: self.ticket_collection.read(),
             };
-            ticket_collection.mint_ticket(self.collection_id.read());
+            ticket_collection.mint_ticket(self.collection_id.read(), sender);
             true
         }
     }

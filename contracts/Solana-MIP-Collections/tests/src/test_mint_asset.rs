@@ -40,7 +40,6 @@ fn setup_with_collection() -> (LiteSVM, Keypair, Keypair) {
         data: mip_collections::instruction::CreateCollection {
             name: "My IP".to_string(),
             uri: "ipfs://col".to_string(),
-            royalty_bps: 500,
         }
         .data(),
     };
@@ -60,6 +59,7 @@ fn mint_ix(
     core_collection: &Pubkey,
     recipient: &Pubkey,
     uri: &str,
+    royalty_bps: u16,
 ) -> Instruction {
     Instruction {
         program_id: program_id(),
@@ -75,9 +75,29 @@ fn mint_ix(
         data: mip_collections::instruction::MintAsset {
             name: "Work #1".to_string(),
             uri: uri.to_string(),
+            royalty_bps,
         }
         .data(),
     }
+}
+
+fn send_mint(
+    svm: &mut LiteSVM,
+    authority: &Keypair,
+    asset: &Keypair,
+    core_collection: &Pubkey,
+    recipient: &Pubkey,
+    uri: &str,
+    royalty_bps: u16,
+) -> Result<(), String> {
+    let ix = mint_ix(&authority.pubkey(), &asset.pubkey(), core_collection, recipient, uri, royalty_bps);
+    let tx = Transaction::new_signed_with_payer(
+        &[ix],
+        Some(&authority.pubkey()),
+        &[authority, asset],
+        svm.latest_blockhash(),
+    );
+    svm.send_transaction(tx).map(|_| ()).map_err(|e| format!("{:?}", e.err))
 }
 
 #[test]
@@ -86,20 +106,16 @@ fn mint_asset_into_collection_for_recipient() {
     let alice = Keypair::new();
     let asset = Keypair::new();
 
-    let ix = mint_ix(
-        &creator.pubkey(),
-        &asset.pubkey(),
+    send_mint(
+        &mut svm,
+        &creator,
+        &asset,
         &core_collection.pubkey(),
         &alice.pubkey(),
         "ipfs://asset/1",
-    );
-    let tx = Transaction::new_signed_with_payer(
-        &[ix],
-        Some(&creator.pubkey()),
-        &[&creator, &asset],
-        svm.latest_blockhash(),
-    );
-    svm.send_transaction(tx).unwrap();
+        500,
+    )
+    .unwrap();
 
     let asset_account = svm.get_account(&asset.pubkey()).unwrap();
     assert_eq!(asset_account.owner, MPL_CORE_ID);
@@ -111,6 +127,79 @@ fn mint_asset_into_collection_for_recipient() {
         base.update_authority,
         mpl_core::types::UpdateAuthority::Collection(core_collection.pubkey())
     );
+
+    // Immutable per-asset royalty: creator sole beneficiary, authority None
+    // so no one — including the collection authority — can ever change it.
+    let parsed = mpl_core::Asset::from_bytes(&asset_account.data).unwrap();
+    let royalties = parsed.plugin_list.royalties.expect("royalties plugin");
+    assert_eq!(royalties.royalties.basis_points, 500);
+    assert_eq!(royalties.royalties.creators.len(), 1);
+    assert_eq!(royalties.royalties.creators[0].address, creator.pubkey());
+    assert_eq!(royalties.royalties.creators[0].percentage, 100);
+    assert_eq!(royalties.base.authority.authority_type, mpl_core::AuthorityType::None);
+}
+
+#[test]
+fn mint_asset_zero_royalty_still_records_creator() {
+    let (mut svm, creator, core_collection) = setup_with_collection();
+    let alice = Keypair::new();
+    let asset = Keypair::new();
+
+    send_mint(
+        &mut svm,
+        &creator,
+        &asset,
+        &core_collection.pubkey(),
+        &alice.pubkey(),
+        "ipfs://asset/1",
+        0,
+    )
+    .unwrap();
+
+    let asset_account = svm.get_account(&asset.pubkey()).unwrap();
+    let parsed = mpl_core::Asset::from_bytes(&asset_account.data).unwrap();
+    let royalties = parsed.plugin_list.royalties.expect("royalties plugin");
+    assert_eq!(royalties.royalties.basis_points, 0);
+    assert_eq!(royalties.royalties.creators[0].address, creator.pubkey());
+    assert_eq!(royalties.base.authority.authority_type, mpl_core::AuthorityType::None);
+}
+
+#[test]
+fn mint_asset_rejects_royalty_over_100_pct() {
+    let (mut svm, creator, core_collection) = setup_with_collection();
+    let asset = Keypair::new();
+
+    let err = send_mint(
+        &mut svm,
+        &creator,
+        &asset,
+        &core_collection.pubkey(),
+        &creator.pubkey(),
+        "ipfs://asset/1",
+        10_001,
+    )
+    .unwrap_err();
+    // Anchor error code 6000 is the first #[error_code] variant: RoyaltyBpsTooHigh.
+    assert!(err.contains("Custom(6000)"), "unexpected error: {err}");
+}
+
+#[test]
+fn mint_asset_rejects_empty_uri() {
+    let (mut svm, creator, core_collection) = setup_with_collection();
+    let asset = Keypair::new();
+
+    let err = send_mint(
+        &mut svm,
+        &creator,
+        &asset,
+        &core_collection.pubkey(),
+        &creator.pubkey(),
+        "",
+        0,
+    )
+    .unwrap_err();
+    // Anchor error code 6002 is the third #[error_code] variant: InvalidUri.
+    assert!(err.contains("Custom(6002)"), "unexpected error: {err}");
 }
 
 #[test]
@@ -120,19 +209,14 @@ fn mint_asset_rejects_non_authority() {
     svm.airdrop(&mallory.pubkey(), 10_000_000_000).unwrap();
     let asset = Keypair::new();
 
-    let ix = mint_ix(
-        &mallory.pubkey(),
-        &asset.pubkey(),
+    let result = send_mint(
+        &mut svm,
+        &mallory,
+        &asset,
         &core_collection.pubkey(),
         &mallory.pubkey(),
         "ipfs://evil",
+        0,
     );
-    let tx = Transaction::new_signed_with_payer(
-        &[ix],
-        Some(&mallory.pubkey()),
-        &[&mallory, &asset],
-        svm.latest_blockhash(),
-    );
-    let result = svm.send_transaction(tx);
     assert!(result.is_err(), "non-authority mint must fail via Core");
 }

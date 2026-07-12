@@ -17,4 +17,19 @@ pub trait IIPClubNFT<TContractState> {
     fn get_ip_club_manager(self: @TContractState) -> ContractAddress;
     fn get_associated_club_id(self: @TContractState) -> u256;
     fn get_last_minted_id(self: @TContractState) -> u256;
+    fn royalty_info(
+        self: @TContractState, token_id: u256, sale_price: u256,
+    ) -> (ContractAddress, u256);
+    fn royaltyInfo(
+        self: @TContractState, token_id: u256, sale_price: u256,
+    ) -> (ContractAddress, u256);
+    fn version(self: @TContractState) -> ByteArray;
 }
+
+// Marks a collection whose metadata JSON carries the Mediolano programmable
+// license trait schema (License, Commercial Use, Derivatives, Attribution,
+// Territory, AI Policy, Standard, Registration). Discovery only — the license
+// remains data in metadata, not contract-enforced state.
+// Derivation: starknet_keccak("mediolano.licensed-collection.v1").
+pub const ILICENSED_COLLECTION_ID: felt252 =
+    0x3aaa3269207d0d03ca389e2a76f46c207ff513c2503ba463805d76ce52d75b8;

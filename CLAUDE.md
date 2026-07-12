@@ -96,3 +96,19 @@ Current `MIP-Collections-ERC721` deployment — **chain: Starknet** (v0.4.0, on-
 - Use `pub mod` in `lib.cairo` to expose modules; keep internal helpers private
 - Error strings must be `felt252` short strings (≤31 chars) for `assert!` messages
 - Import storage traits explicitly: `StorageMapReadAccess`, `StoragePointerReadAccess`, etc.
+
+### EVM-MIP-Collections (`contracts/EVM-MIP-Collections/`) — Ethereum + Base (Solidity)
+
+ERC-721 IP collection issuance for EVM chains. Registry + clone pattern mirroring
+`MIP-Collections-ERC721` (Cairo): `MIPRegistry` (ownerless, permissionless, zero-fee)
+deploys per-creator `MIPCollection` clones (OZ v5 upgradeable-style initializers, ERC-2981,
+archive semantics). One codebase deploys to both Ethereum and Base.
+
+- **Stack**: Solidity 0.8.28 + OpenZeppelin v5.4.0 + Foundry
+- **Status**: built and tested; NOT deployed (deploys are Phase 4, separately authorized)
+
+Build & test:
+
+    cd contracts/EVM-MIP-Collections
+    forge build
+    forge test

@@ -112,3 +112,20 @@ Build & test:
     cd contracts/EVM-MIP-Collections
     forge build
     forge test
+
+### EVM-MIP-Editions (`contracts/EVM-MIP-Editions/`) — Ethereum + Base (Solidity)
+
+ERC-1155 edition issuance for EVM chains. Registry + clone pattern mirroring
+`IP-Programmable-ERC1155-Collections` (Cairo): `MIPEditionsRegistry` (ownerless,
+permissionless, zero-fee) deploys per-creator `MIPEditionCollection` clones
+(sequential edition ids with per-edition URI + supply, addSupply for existing
+editions, ERC-2981). One codebase deploys to both Ethereum and Base.
+
+- **Stack**: Solidity 0.8.28 + OpenZeppelin v5.4.0 + Foundry
+- **Status**: built and tested; NOT deployed (deploys are Phase 4, separately authorized)
+
+Build & test:
+
+    cd contracts/EVM-MIP-Editions
+    forge build
+    forge test

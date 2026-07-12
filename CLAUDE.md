@@ -129,3 +129,22 @@ Build & test:
     cd contracts/EVM-MIP-Editions
     forge build
     forge test
+
+### Solana-MIP-Collections (`contracts/Solana-MIP-Collections/`) — Solana (Rust/Anchor)
+
+IP collection issuance for Solana: a permissionless, zero-fee, ownerless
+registry + CPI wrapper over Metaplex Core. `create_collection` creates a Core
+collection owned by its creator (Core Royalties plugin, creator as sole
+beneficiary) and records it under a sequential id; `mint_asset` mints Core
+assets with authority enforced by Core itself. The program holds no rights
+over created collections.
+
+- **Stack**: Rust 1.89 (pinned toolchain) + Anchor 1.1.2 + Solana/Agave 3.1.10 + mpl-core 0.12.1
+- **Tests**: Rust LiteSVM (0.13.1) against the real mainnet `mpl_core.so` fixture (`tests/fixtures/`)
+- **Status**: built and tested; NOT deployed (deploys separately authorized; revoke upgrade authority at deploy)
+
+Build & test:
+
+    cd contracts/Solana-MIP-Collections
+    anchor build
+    cargo test

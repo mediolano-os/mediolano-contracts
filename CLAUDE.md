@@ -105,7 +105,7 @@ deploys per-creator `MIPCollection` clones (OZ v5 upgradeable-style initializers
 archive semantics). One codebase deploys to both Ethereum and Base.
 
 - **Stack**: Solidity 0.8.28 + OpenZeppelin v5.4.0 + Foundry
-- **Status**: built and tested; NOT deployed (deploys are Phase 4, separately authorized)
+- **Status**: built, tested, and parity-reviewed against the Cairo original (2026-07-12, fixes merged); NOT deployed (deploys are Phase 4, separately authorized)
 
 Build & test:
 
@@ -122,7 +122,7 @@ permissionless, zero-fee) deploys per-creator `MIPEditionCollection` clones
 editions, ERC-2981). One codebase deploys to both Ethereum and Base.
 
 - **Stack**: Solidity 0.8.28 + OpenZeppelin v5.4.0 + Foundry
-- **Status**: built and tested; NOT deployed (deploys are Phase 4, separately authorized)
+- **Status**: built, tested, and parity-reviewed against the Cairo original (2026-07-12, fixes merged); NOT deployed (deploys are Phase 4, separately authorized)
 
 Build & test:
 
@@ -141,7 +141,7 @@ over created collections.
 
 - **Stack**: Rust 1.89 (pinned toolchain) + Anchor 1.1.2 + Solana/Agave 3.1.10 + mpl-core 0.12.1
 - **Tests**: Rust LiteSVM (0.13.1) against the real mainnet `mpl_core.so` fixture (`tests/fixtures/`)
-- **Status**: built and tested; NOT deployed (deploys separately authorized; revoke upgrade authority at deploy)
+- **Status**: built, tested, and parity-reviewed against the Cairo original (2026-07-12, fixes merged); NOT deployed (deploys separately authorized; revoke upgrade authority at deploy)
 
 Build & test:
 
@@ -157,13 +157,16 @@ WASM hash (the Starknet class-hash pattern). Collections: owner-gated
 sequential minting from 1 with complete per-token URIs (token_uri overridden —
 never base-uri-composed), OZ Stellar NFT base (transfers/approvals), and the
 OZ royalties interface `royalty_info(token_id, sale_price) -> (Address, i128)`
-with a creator-set, owner-adjustable default.
+with an immutable per-token royalty set at mint (receiver = the minting
+creator; no setter). Each token carries an immutable registration record
+(URI, creator, ledger timestamp); the token's holder can archive it,
+permanently freezing it in place.
 
 - **Stack**: soroban-sdk 26.1.0 + stellar-tokens 0.7.2 (OpenZeppelin Stellar) + wasm32v1-none
 - **Gotchas**: ed25519-dalek must be pinned 2.2.0 (`cargo update -p ed25519-dalek@3.0.0 --precise 2.2.0`);
   wasm builds need `SOROBAN_SDK_BUILD_SYSTEM_SUPPORTS_SPEC_SHAKING_V2=true` (or stellar-cli ≥25.2's
   `stellar contract build`); OZ Base handles require_auth internally (don't double-auth)
-- **Status**: built and tested; NOT deployed (deploys separately authorized)
+- **Status**: built, tested, and parity-reviewed against the Cairo original (2026-07-12, fixes merged); NOT deployed (deploys separately authorized)
 
 Build & test:
 

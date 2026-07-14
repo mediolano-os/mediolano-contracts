@@ -3,7 +3,9 @@ pub mod Receiver {
     use openzeppelin_introspection::src5::SRC5Component;
     use openzeppelin_token::erc1155::ERC1155ReceiverComponent;
 
-    component!(path: ERC1155ReceiverComponent, storage: erc1155_receiver, event: ERC1155ReceiverEvent);
+    component!(
+        path: ERC1155ReceiverComponent, storage: erc1155_receiver, event: ERC1155ReceiverEvent,
+    );
     component!(path: SRC5Component, storage: src5, event: SRC5Event);
 
     #[abi(embed_v0)]

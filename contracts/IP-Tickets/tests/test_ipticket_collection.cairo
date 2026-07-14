@@ -1,8 +1,8 @@
 use ip_ticket::interface::{IIPTicketCollectionDispatcher, IIPTicketCollectionDispatcherTrait};
-use openzeppelin_utils::serde::SerializedAppend;
 use openzeppelin_introspection::interface::{ISRC5Dispatcher, ISRC5DispatcherTrait};
 use openzeppelin_token::common::erc2981::interface::IERC2981_ID;
 use openzeppelin_token::erc1155::interface::{IERC1155Dispatcher, IERC1155DispatcherTrait};
+use openzeppelin_utils::serde::SerializedAppend;
 use snforge_std::{
     ContractClassTrait, DeclareResultTrait, declare, start_cheat_block_timestamp,
     start_cheat_caller_address, stop_cheat_caller_address,
@@ -29,89 +29,106 @@ fn deploy_collection_with_owner(owner: ContractAddress) -> ContractAddress {
     let mut cd: Array<felt252> = array![];
     let name: ByteArray = "IP Tickets Test";
     let symbol: ByteArray = "TICK";
+    let base_uri: ByteArray = "ipfs://QmCollectionMeta/";
     cd.append_serde(name);
     cd.append_serde(symbol);
+    cd.append_serde(base_uri);
     cd.append_serde(owner);
     let (addr, _) = class.deploy(@cd).unwrap();
     addr
 }
 
-// ──────────────── create_event ─────────────────────────────────────────────
+// ──────────────── create_ticket
+// ────────────────────────────────────────────
 
 #[test]
-fn test_create_event_assigns_token_id() {
+fn test_create_ticket_assigns_token_id() {
     let owner = deploy_mock_account();
     let addr = deploy_collection_with_owner(owner);
     let ticket = IIPTicketCollectionDispatcher { contract_address: addr };
     start_cheat_caller_address(addr, owner);
-    let id = ticket.create_event(100_u256, Option::None, Option::None, 500_u16, "ipfs://QmTest1");
+    let id = ticket.create_ticket(100_u256, Option::None, Option::None, 500_u16, "ipfs://QmTest1");
     stop_cheat_caller_address(addr);
-    assert(id == 1_u256, 'first event id should be 1');
+    assert(id == 1_u256, 'first ticket id should be 1');
 }
 
 #[test]
-fn test_second_event_increments_id() {
+fn test_second_ticket_increments_id() {
     let owner = deploy_mock_account();
     let addr = deploy_collection_with_owner(owner);
     let ticket = IIPTicketCollectionDispatcher { contract_address: addr };
     start_cheat_caller_address(addr, owner);
-    ticket.create_event(10_u256, Option::None, Option::None, 0_u16, "ipfs://QmA");
-    let id2 = ticket.create_event(20_u256, Option::None, Option::None, 0_u16, "ipfs://QmB");
+    ticket.create_ticket(10_u256, Option::None, Option::None, 0_u16, "ipfs://QmA");
+    let id2 = ticket.create_ticket(20_u256, Option::None, Option::None, 0_u16, "ipfs://QmB");
     stop_cheat_caller_address(addr);
-    assert(id2 == 2_u256, 'second event id should be 2');
+    assert(id2 == 2_u256, 'second ticket id should be 2');
 }
 
 #[test]
 #[should_panic(expected: 'Caller is not the owner')]
-fn test_create_event_non_owner_panics() {
+fn test_create_ticket_non_owner_panics() {
     let addr = deploy_collection();
     let ticket = IIPTicketCollectionDispatcher { contract_address: addr };
     start_cheat_caller_address(addr, OTHER());
-    ticket.create_event(10_u256, Option::None, Option::None, 0_u16, "ipfs://QmX");
+    ticket.create_ticket(10_u256, Option::None, Option::None, 0_u16, "ipfs://QmX");
 }
 
 #[test]
 #[should_panic(expected: 'Max supply is zero')]
-fn test_create_event_zero_supply_panics() {
+fn test_create_ticket_zero_supply_panics() {
     let owner = deploy_mock_account();
     let addr = deploy_collection_with_owner(owner);
     let ticket = IIPTicketCollectionDispatcher { contract_address: addr };
     start_cheat_caller_address(addr, owner);
-    ticket.create_event(0_u256, Option::None, Option::None, 0_u16, "ipfs://QmX");
+    ticket.create_ticket(0_u256, Option::None, Option::None, 0_u16, "ipfs://QmX");
 }
 
 #[test]
 #[should_panic(expected: 'URI must be ipfs:// or ar://')]
-fn test_create_event_bad_uri_panics() {
+fn test_create_ticket_bad_uri_panics() {
     let owner = deploy_mock_account();
     let addr = deploy_collection_with_owner(owner);
     let ticket = IIPTicketCollectionDispatcher { contract_address: addr };
     start_cheat_caller_address(addr, owner);
-    ticket.create_event(10_u256, Option::None, Option::None, 0_u16, "https://example.com");
+    ticket.create_ticket(10_u256, Option::None, Option::None, 0_u16, "https://example.com");
 }
 
 #[test]
 #[should_panic(expected: 'Royalty exceeds 10000')]
-fn test_create_event_royalty_overflow_panics() {
+fn test_create_ticket_royalty_overflow_panics() {
     let owner = deploy_mock_account();
     let addr = deploy_collection_with_owner(owner);
     let ticket = IIPTicketCollectionDispatcher { contract_address: addr };
     start_cheat_caller_address(addr, owner);
-    ticket.create_event(10_u256, Option::None, Option::None, 10001_u16, "ipfs://QmX");
+    ticket.create_ticket(10_u256, Option::None, Option::None, 10001_u16, "ipfs://QmX");
 }
 
 #[test]
-fn test_create_event_ar_uri_accepted() {
+fn test_create_ticket_ar_uri_accepted() {
     let owner = deploy_mock_account();
     let addr = deploy_collection_with_owner(owner);
     let ticket = IIPTicketCollectionDispatcher { contract_address: addr };
     start_cheat_caller_address(addr, owner);
-    let id = ticket.create_event(5_u256, Option::None, Option::None, 0_u16, "ar://txhash123");
+    let id = ticket.create_ticket(5_u256, Option::None, Option::None, 0_u16, "ar://txhash123");
     stop_cheat_caller_address(addr);
     assert(id == 1_u256, 'ar:// uri should be accepted');
 }
 
-// ──────────────── mint ─────────────────────────────────────────────────────
+#[test]
+#[should_panic(expected: 'end_time before start_time')]
+fn test_create_ticket_inverted_window_panics() {
+    let owner = deploy_mock_account();
+    let addr = deploy_collection_with_owner(owner);
+    let ticket = IIPTicketCollectionDispatcher { contract_address: addr };
+    start_cheat_caller_address(addr, owner);
+    ticket
+        .create_ticket(
+            10_u256, Option::Some(2000_u64), Option::Some(1000_u64), 0_u16, "ipfs://QmX",
+        );
+}
+
+// ──────────────── mint
+// ─────────────────────────────────────────────────────
 
 #[test]
 fn test_mint_increases_balance() {
@@ -121,7 +138,7 @@ fn test_mint_increases_balance() {
     let ticket = IIPTicketCollectionDispatcher { contract_address: addr };
     let erc1155 = IERC1155Dispatcher { contract_address: addr };
     start_cheat_caller_address(addr, owner);
-    let id = ticket.create_event(100_u256, Option::None, Option::None, 0_u16, "ipfs://QmM");
+    let id = ticket.create_ticket(100_u256, Option::None, Option::None, 0_u16, "ipfs://QmM");
     ticket.mint(recipient, id, 3_u256);
     stop_cheat_caller_address(addr);
     assert(erc1155.balance_of(recipient, id) == 3_u256, 'balance should be 3');
@@ -135,7 +152,7 @@ fn test_mint_non_owner_panics() {
     let addr = deploy_collection_with_owner(owner);
     let ticket = IIPTicketCollectionDispatcher { contract_address: addr };
     start_cheat_caller_address(addr, owner);
-    let id = ticket.create_event(10_u256, Option::None, Option::None, 0_u16, "ipfs://QmM");
+    let id = ticket.create_ticket(10_u256, Option::None, Option::None, 0_u16, "ipfs://QmM");
     stop_cheat_caller_address(addr);
     start_cheat_caller_address(addr, OTHER());
     ticket.mint(recipient, id, 1_u256);
@@ -149,21 +166,19 @@ fn test_mint_exceeds_supply_panics() {
     let addr = deploy_collection_with_owner(owner);
     let ticket = IIPTicketCollectionDispatcher { contract_address: addr };
     start_cheat_caller_address(addr, owner);
-    let id = ticket.create_event(2_u256, Option::None, Option::None, 0_u16, "ipfs://QmS");
+    let id = ticket.create_ticket(2_u256, Option::None, Option::None, 0_u16, "ipfs://QmS");
     ticket.mint(recipient, id, 3_u256);
 }
 
 #[test]
-#[should_panic(expected: 'Event is paused')]
-fn test_mint_paused_event_panics() {
+#[should_panic(expected: 'Ticket not found')]
+fn test_mint_unknown_ticket_panics() {
     let owner = deploy_mock_account();
     let recipient = deploy_mock_account();
     let addr = deploy_collection_with_owner(owner);
     let ticket = IIPTicketCollectionDispatcher { contract_address: addr };
     start_cheat_caller_address(addr, owner);
-    let id = ticket.create_event(10_u256, Option::None, Option::None, 0_u16, "ipfs://QmP");
-    ticket.pause_event(id, false);
-    ticket.mint(recipient, id, 1_u256);
+    ticket.mint(recipient, 42_u256, 1_u256);
 }
 
 #[test]
@@ -175,9 +190,8 @@ fn test_mint_before_start_time_panics() {
     let ticket = IIPTicketCollectionDispatcher { contract_address: addr };
     start_cheat_block_timestamp(addr, 1000);
     start_cheat_caller_address(addr, owner);
-    let id = ticket.create_event(
-        10_u256, Option::Some(2000_u64), Option::None, 0_u16, "ipfs://QmT",
-    );
+    let id = ticket
+        .create_ticket(10_u256, Option::Some(2000_u64), Option::None, 0_u16, "ipfs://QmT");
     ticket.mint(recipient, id, 1_u256);
 }
 
@@ -190,9 +204,8 @@ fn test_mint_after_end_time_panics() {
     let ticket = IIPTicketCollectionDispatcher { contract_address: addr };
     start_cheat_block_timestamp(addr, 3000);
     start_cheat_caller_address(addr, owner);
-    let id = ticket.create_event(
-        10_u256, Option::None, Option::Some(2000_u64), 0_u16, "ipfs://QmE",
-    );
+    let id = ticket
+        .create_ticket(10_u256, Option::None, Option::Some(2000_u64), 0_u16, "ipfs://QmE");
     ticket.mint(recipient, id, 1_u256);
 }
 
@@ -205,15 +218,15 @@ fn test_mint_within_window() {
     let erc1155 = IERC1155Dispatcher { contract_address: addr };
     start_cheat_block_timestamp(addr, 500);
     start_cheat_caller_address(addr, owner);
-    let id = ticket.create_event(
-        10_u256, Option::Some(100_u64), Option::Some(1000_u64), 0_u16, "ipfs://QmW",
-    );
+    let id = ticket
+        .create_ticket(10_u256, Option::Some(100_u64), Option::Some(1000_u64), 0_u16, "ipfs://QmW");
     ticket.mint(recipient, id, 2_u256);
     stop_cheat_caller_address(addr);
     assert(erc1155.balance_of(recipient, id) == 2_u256, 'balance in window');
 }
 
-// ──────────────── is_valid ─────────────────────────────────────────────────
+// ──────────────── is_valid
+// ─────────────────────────────────────────────────
 
 #[test]
 fn test_is_valid_true_for_holder_in_window() {
@@ -223,9 +236,8 @@ fn test_is_valid_true_for_holder_in_window() {
     let ticket = IIPTicketCollectionDispatcher { contract_address: addr };
     start_cheat_block_timestamp(addr, 500);
     start_cheat_caller_address(addr, owner);
-    let id = ticket.create_event(
-        10_u256, Option::Some(100_u64), Option::Some(1000_u64), 0_u16, "ipfs://QmV",
-    );
+    let id = ticket
+        .create_ticket(10_u256, Option::Some(100_u64), Option::Some(1000_u64), 0_u16, "ipfs://QmV");
     ticket.mint(recipient, id, 1_u256);
     stop_cheat_caller_address(addr);
     assert(ticket.is_valid(id, recipient), 'should be valid');
@@ -239,9 +251,8 @@ fn test_is_valid_false_after_end_time() {
     let ticket = IIPTicketCollectionDispatcher { contract_address: addr };
     start_cheat_block_timestamp(addr, 500);
     start_cheat_caller_address(addr, owner);
-    let id = ticket.create_event(
-        10_u256, Option::None, Option::Some(1000_u64), 0_u16, "ipfs://QmWW",
-    );
+    let id = ticket
+        .create_ticket(10_u256, Option::None, Option::Some(1000_u64), 0_u16, "ipfs://QmWW");
     ticket.mint(recipient, id, 1_u256);
     stop_cheat_caller_address(addr);
     start_cheat_block_timestamp(addr, 2000);
@@ -256,7 +267,7 @@ fn test_is_valid_false_for_non_holder() {
     let addr = deploy_collection_with_owner(owner);
     let ticket = IIPTicketCollectionDispatcher { contract_address: addr };
     start_cheat_caller_address(addr, owner);
-    let id = ticket.create_event(10_u256, Option::None, Option::None, 0_u16, "ipfs://QmN");
+    let id = ticket.create_ticket(10_u256, Option::None, Option::None, 0_u16, "ipfs://QmN");
     ticket.mint(recipient, id, 1_u256);
     stop_cheat_caller_address(addr);
     assert(!ticket.is_valid(id, non_holder), 'non-holder invalid');
@@ -269,30 +280,22 @@ fn test_is_valid_no_time_window() {
     let addr = deploy_collection_with_owner(owner);
     let ticket = IIPTicketCollectionDispatcher { contract_address: addr };
     start_cheat_caller_address(addr, owner);
-    let id = ticket.create_event(10_u256, Option::None, Option::None, 0_u16, "ipfs://QmO");
+    let id = ticket.create_ticket(10_u256, Option::None, Option::None, 0_u16, "ipfs://QmO");
     ticket.mint(recipient, id, 1_u256);
     stop_cheat_caller_address(addr);
     assert(ticket.is_valid(id, recipient), 'no window = always valid');
 }
 
-// ──────────────── pause_event ──────────────────────────────────────────────
-
 #[test]
-fn test_pause_and_resume_event() {
+fn test_is_valid_false_for_unknown_ticket() {
     let owner = deploy_mock_account();
     let addr = deploy_collection_with_owner(owner);
     let ticket = IIPTicketCollectionDispatcher { contract_address: addr };
-    start_cheat_caller_address(addr, owner);
-    let id = ticket.create_event(10_u256, Option::None, Option::None, 0_u16, "ipfs://QmPR");
-    ticket.pause_event(id, false);
-    let ev = ticket.get_event(id);
-    assert(!ev.active, 'should be paused');
-    ticket.pause_event(id, true);
-    let ev2 = ticket.get_event(id);
-    assert(ev2.active, 'should be resumed');
+    assert(!ticket.is_valid(7_u256, owner), 'unknown id invalid');
 }
 
-// ──────────────── royalty_info ─────────────────────────────────────────────
+// ──────────────── royalty_info
+// ─────────────────────────────────────────────
 
 #[test]
 fn test_royalty_info() {
@@ -300,7 +303,7 @@ fn test_royalty_info() {
     let addr = deploy_collection_with_owner(owner);
     let ticket = IIPTicketCollectionDispatcher { contract_address: addr };
     start_cheat_caller_address(addr, owner);
-    let id = ticket.create_event(10_u256, Option::None, Option::None, 500_u16, "ipfs://QmR");
+    let id = ticket.create_ticket(10_u256, Option::None, Option::None, 500_u16, "ipfs://QmR");
     stop_cheat_caller_address(addr);
     let (receiver, amount) = ticket.royalty_info(id, 10000_u256);
     assert(receiver == owner, 'receiver should be owner');
@@ -313,38 +316,61 @@ fn test_royalty_info_camel() {
     let addr = deploy_collection_with_owner(owner);
     let ticket = IIPTicketCollectionDispatcher { contract_address: addr };
     start_cheat_caller_address(addr, owner);
-    let id = ticket.create_event(10_u256, Option::None, Option::None, 1000_u16, "ipfs://QmRC");
+    let id = ticket.create_ticket(10_u256, Option::None, Option::None, 1000_u16, "ipfs://QmRC");
     stop_cheat_caller_address(addr);
     let (_, amount) = ticket.royaltyInfo(id, 10000_u256);
     assert(amount == 1000_u256, 'royalty 10% of 10000');
 }
 
-// ──────────────── get_event ────────────────────────────────────────────────
+// ──────────────── get_ticket
+// ───────────────────────────────────────────────
 
 #[test]
-fn test_get_event_returns_record() {
+fn test_get_ticket_returns_record() {
     let owner = deploy_mock_account();
     let addr = deploy_collection_with_owner(owner);
     let ticket = IIPTicketCollectionDispatcher { contract_address: addr };
     start_cheat_caller_address(addr, owner);
-    let id = ticket.create_event(
-        42_u256, Option::Some(100_u64), Option::Some(999_u64), 250_u16, "ipfs://QmG",
-    );
+    let id = ticket
+        .create_ticket(
+            42_u256, Option::Some(100_u64), Option::Some(999_u64), 250_u16, "ipfs://QmG",
+        );
     stop_cheat_caller_address(addr);
-    let ev = ticket.get_event(id);
-    assert(ev.max_supply == 42_u256, 'max_supply');
-    assert(ev.royalty_bps == 250_u16, 'royalty_bps');
-    assert(ev.active, 'active by default');
-    assert(ev.minted == 0_u256, 'minted starts at 0');
+    let t = ticket.get_ticket(id);
+    assert(t.max_supply == 42_u256, 'max_supply');
+    assert(t.royalty_bps == 250_u16, 'royalty_bps');
+    assert(t.minted == 0_u256, 'minted starts at 0');
 }
 
-// ──────────────── version & SRC5 ──────────────────────────────────────────
+#[test]
+#[should_panic(expected: 'Ticket not found')]
+fn test_get_ticket_unknown_id_panics() {
+    let addr = deploy_collection();
+    let ticket = IIPTicketCollectionDispatcher { contract_address: addr };
+    ticket.get_ticket(99_u256);
+}
+
+// ──────────────── collection identity
+// ──────────────────────────────────────
+
+#[test]
+fn test_collection_identity_views() {
+    let owner = deploy_mock_account();
+    let addr = deploy_collection_with_owner(owner);
+    let ticket = IIPTicketCollectionDispatcher { contract_address: addr };
+    assert(ticket.name() == "IP Tickets Test", 'name view');
+    assert(ticket.symbol() == "TICK", 'symbol view');
+    assert(ticket.base_uri() == "ipfs://QmCollectionMeta/", 'base_uri view');
+}
+
+// ──────────────── version & SRC5
+// ───────────────────────────────────────────
 
 #[test]
 fn test_version() {
     let addr = deploy_collection();
     let ticket = IIPTicketCollectionDispatcher { contract_address: addr };
-    assert(ticket.version() == "3.0.0", 'version should be 3.0.0');
+    assert(ticket.version() == "4.0.0", 'version should be 4.0.0');
 }
 
 #[test]

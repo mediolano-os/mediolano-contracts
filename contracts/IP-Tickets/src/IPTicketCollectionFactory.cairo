@@ -1,9 +1,9 @@
 // DESIGN: IPTicketCollectionFactory is the single deploy point for all
 // IPTicketCollection contracts. Anyone can deploy a new ticket collection —
-// the caller becomes its owner and the only address that can create ticket
-// collections (event/tier batches) inside it. The factory is fully immutable
-// and ownerless: the collection class hash is fixed at deploy time. Mirrors
-// IPCollectionFactory (IP-Programmable-ERC1155-Collections).
+// the caller becomes its owner and the only address that can create and mint
+// tickets inside it. The factory is fully immutable and ownerless: the
+// collection class hash is fixed at deploy time. Mirrors IPCollectionFactory
+// (IP-Programmable-ERC1155-Collections).
 
 #[starknet::contract]
 pub mod IPTicketCollectionFactory {
@@ -73,11 +73,11 @@ pub mod IPTicketCollectionFactory {
         }
 
         fn version(self: @ContractState) -> ByteArray {
-            "3.0.0"
+            "4.0.0"
         }
 
         fn deploy_collection(
-            ref self: ContractState, name: ByteArray, symbol: ByteArray,
+            ref self: ContractState, name: ByteArray, symbol: ByteArray, base_uri: ByteArray,
         ) -> ContractAddress {
             assert(name.len() > 0, 'Name must not be empty');
             assert(symbol.len() > 0, 'Symbol must not be empty');
@@ -89,10 +89,11 @@ pub mod IPTicketCollectionFactory {
             let salt = PoseidonTrait::new().update_with(caller).update_with(nonce).finalize();
             self.deploy_nonce.write(nonce + 1);
 
-            // Serialize constructor calldata: (name, symbol, owner).
+            // Serialize constructor calldata: (name, symbol, base_uri, owner).
             let mut calldata: Array<felt252> = array![];
             name.serialize(ref calldata);
             symbol.serialize(ref calldata);
+            base_uri.serialize(ref calldata);
             caller.serialize(ref calldata);
 
             let (collection_address, _) = deploy_syscall(

@@ -4,8 +4,8 @@ use ip_ticket::interface::{
     IIPTicketCollectionFactoryDispatcher, IIPTicketCollectionFactoryDispatcherTrait,
     IIP_TICKET_COLLECTION_FACTORY_ID,
 };
-use openzeppelin_utils::serde::SerializedAppend;
 use openzeppelin_introspection::interface::{ISRC5Dispatcher, ISRC5DispatcherTrait};
+use openzeppelin_utils::serde::SerializedAppend;
 use snforge_std::{
     ContractClassTrait, DeclareResultTrait, declare, start_cheat_caller_address,
     stop_cheat_caller_address,
@@ -27,7 +27,8 @@ fn deploy_factory() -> ContractAddress {
     addr
 }
 
-// ──────────────── deploy_collection ───────────────────────────────────────
+// ──────────────── deploy_collection
+// ────────────────────────────────────────
 
 #[test]
 fn test_deploy_collection_returns_address() {
@@ -35,7 +36,7 @@ fn test_deploy_collection_returns_address() {
     let factory = IIPTicketCollectionFactoryDispatcher { contract_address: factory_addr };
     let caller = deploy_mock_account();
     start_cheat_caller_address(factory_addr, caller);
-    let col = factory.deploy_collection("Fest Tickets", "FEST");
+    let col = factory.deploy_collection("Fest Tickets", "FEST", "ipfs://QmFestMeta/");
     stop_cheat_caller_address(factory_addr);
     assert(!col.is_zero(), 'collection address is zero');
 }
@@ -46,14 +47,28 @@ fn test_deployed_collection_owner_is_caller() {
     let factory = IIPTicketCollectionFactoryDispatcher { contract_address: factory_addr };
     let caller = deploy_mock_account();
     start_cheat_caller_address(factory_addr, caller);
-    let col_addr = factory.deploy_collection("My Tickets", "TICK");
+    let col_addr = factory.deploy_collection("My Tickets", "TICK", "ipfs://QmMeta/");
     stop_cheat_caller_address(factory_addr);
-    // Caller should be able to create an event without panic
+    // The caller can create a ticket without panic — they own the collection.
     let ticket = IIPTicketCollectionDispatcher { contract_address: col_addr };
     start_cheat_caller_address(col_addr, caller);
-    let id = ticket.create_event(10_u256, Option::None, Option::None, 0_u16, "ipfs://QmTest");
+    let id = ticket.create_ticket(10_u256, Option::None, Option::None, 0_u16, "ipfs://QmTest");
     stop_cheat_caller_address(col_addr);
-    assert(id == 1_u256, 'first event id = 1');
+    assert(id == 1_u256, 'first ticket id = 1');
+}
+
+#[test]
+fn test_deployed_collection_carries_base_uri() {
+    let factory_addr = deploy_factory();
+    let factory = IIPTicketCollectionFactoryDispatcher { contract_address: factory_addr };
+    let caller = deploy_mock_account();
+    start_cheat_caller_address(factory_addr, caller);
+    let col_addr = factory.deploy_collection("My Tickets", "TICK", "ipfs://QmCollMeta/");
+    stop_cheat_caller_address(factory_addr);
+    let ticket = IIPTicketCollectionDispatcher { contract_address: col_addr };
+    assert(ticket.name() == "My Tickets", 'name propagated');
+    assert(ticket.symbol() == "TICK", 'symbol propagated');
+    assert(ticket.base_uri() == "ipfs://QmCollMeta/", 'base_uri propagated');
 }
 
 #[test]
@@ -62,8 +77,8 @@ fn test_two_deployments_have_different_addresses() {
     let factory = IIPTicketCollectionFactoryDispatcher { contract_address: factory_addr };
     let caller = deploy_mock_account();
     start_cheat_caller_address(factory_addr, caller);
-    let col1 = factory.deploy_collection("Event A", "EVA");
-    let col2 = factory.deploy_collection("Event B", "EVB");
+    let col1 = factory.deploy_collection("Tickets A", "TIXA", "ipfs://QmA/");
+    let col2 = factory.deploy_collection("Tickets B", "TIXB", "ipfs://QmB/");
     stop_cheat_caller_address(factory_addr);
     assert(col1 != col2, 'addresses must differ');
 }
@@ -75,10 +90,10 @@ fn test_different_callers_get_different_addresses() {
     let caller1 = deploy_mock_account();
     let caller2 = deploy_mock_account();
     start_cheat_caller_address(factory_addr, caller1);
-    let col1 = factory.deploy_collection("Tickets", "TIX");
+    let col1 = factory.deploy_collection("Tickets", "TIX", "ipfs://QmT/");
     stop_cheat_caller_address(factory_addr);
     start_cheat_caller_address(factory_addr, caller2);
-    let col2 = factory.deploy_collection("Tickets", "TIX");
+    let col2 = factory.deploy_collection("Tickets", "TIX", "ipfs://QmT/");
     stop_cheat_caller_address(factory_addr);
     assert(col1 != col2, 'different callers differ');
 }
@@ -87,7 +102,7 @@ fn test_different_callers_get_different_addresses() {
 fn test_factory_version() {
     let factory_addr = deploy_factory();
     let factory = IIPTicketCollectionFactoryDispatcher { contract_address: factory_addr };
-    assert(factory.version() == "3.0.0", 'factory version 3.0.0');
+    assert(factory.version() == "4.0.0", 'factory version 4.0.0');
 }
 
 #[test]
@@ -104,7 +119,7 @@ fn test_deploy_empty_name_panics() {
     let factory = IIPTicketCollectionFactoryDispatcher { contract_address: factory_addr };
     let caller = deploy_mock_account();
     start_cheat_caller_address(factory_addr, caller);
-    factory.deploy_collection("", "TIX");
+    factory.deploy_collection("", "TIX", "ipfs://QmT/");
 }
 
 #[test]
@@ -114,5 +129,5 @@ fn test_deploy_empty_symbol_panics() {
     let factory = IIPTicketCollectionFactoryDispatcher { contract_address: factory_addr };
     let caller = deploy_mock_account();
     start_cheat_caller_address(factory_addr, caller);
-    factory.deploy_collection("My Tickets", "");
+    factory.deploy_collection("My Tickets", "", "ipfs://QmT/");
 }

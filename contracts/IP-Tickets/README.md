@@ -1,12 +1,13 @@
 # IP Tickets
 
-`IP-Tickets` is a Starknet ERC-721 ticket protocol. `IPTicketCollectionFactory`
+`IP-Tickets` is a Starknet ERC-1155 tickets protocol. `IPTicketCollectionFactory`
 deploys one `IPTicketCollection` per creator; inside their own collection, a
-creator issues one or more ticket collections (e.g. per event or tier), and
-buyers mint tickets from them.
+creator creates tickets — each ticket is one ERC-1155 token id with its own
+supply, optional validity window, royalty, and metadata — and mints them to
+holders.
 
-Tickets are indexable and transferable ERC-721 assets. Access follows current
-ownership until the ticket expires or is redeemed.
+Tickets are indexable and transferable ERC-1155 assets. Validity follows
+current ownership inside the ticket's time window.
 
 ## Design
 
@@ -14,21 +15,26 @@ The contracts follow the Mediolano principles:
 
 - **Ownerless factory, owned collections.** Anyone deploys their own
   `IPTicketCollection` via the factory; the factory itself has no admin, no
-  upgrade path, and takes no fee. Inside a deployed collection, only its
-  owner (the deployer) can create ticket collections or toggle them active —
-  the same access model as every other Medialane per-creator NFT contract.
-- **Creator sales switch.** `set_collection_active(collection_id, active)`
-  (owner only) gates **minting only** — existing tickets keep their access,
-  stay transferable, and stay redeemable. A creator can stop new money (e.g. a
-  cancelled event), never confiscate sold assets.
-- **Checks-effects-interactions.** Collection/token state is final before the
-  payment transfer and `safe_mint`; a reentrant call runs under its own
-  caller context against consistent storage.
+  upgrade path, and takes no fee. Inside a deployed collection, only its owner
+  (the deployer) can create and mint tickets — the same access model as every
+  other per-creator NFT contract in the catalog.
+- **On-chain collection identity.** `deploy_collection(name, symbol, base_uri)`
+  embeds the collection-level metadata URI in the deploy transaction;
+  `name()`, `symbol()`, and `base_uri()` are readable on-chain. Per-ticket
+  metadata lives on each token's `uri(token_id)`.
+- **Minimal primitive.** The contract issues and validates tickets — nothing
+  else. Sales happen on any marketplace that trades ERC-1155 (the tickets are
+  ordinary, standards-compliant assets); door/check-in policy is an
+  application concern built on the public `is_valid` read.
+- **Checks-effects-interactions.** Ticket state is final before
+  `mint_with_acceptance_check`'s external receiver call; a reentrant call runs
+  against consistent storage and cannot pass the supply cap.
 - **Royalty discovery.** The ERC-2981 interface ID is registered via SRC5 and
   `royalty_info` is exposed in snake_case alongside the camelCase
-  `royaltyInfo` alias.
-- **Lean records.** Ticket collection existence derives from `creator != 0`;
-  storage holds only what the contract enforces.
+  `royaltyInfo` alias. The receiver is the collection owner.
+- **Lean records.** Ticket existence derives from `max_supply != 0`
+  (`create_ticket` rejects a zero supply); storage holds only what the
+  contract enforces.
 
 ## Service Asset Declaration
 
@@ -37,31 +43,29 @@ This service follows the shared doctrine in [`docs/SERVICE_ASSET_DOCTRINE.md`](.
 | Field | Value |
 | --- | --- |
 | `service_id` | `ip-tickets` |
-| `asset_standard` | ERC721 |
-| `asset_role` | Transferable ticket / redeemable access pass |
+| `asset_standard` | ERC1155 |
+| `asset_role` | Transferable ticket / verifiable access pass |
 | `transferability` | Transferable |
-| `access_semantics` | Current ownership of at least one unredeemed, unexpired ticket in a collection |
-| `marketplace_visibility` | Display and list as ERC721 tickets |
-| `metadata_uri_policy` | `ipfs://` or `ar://` |
-| `src5_interface_id` | `IIP_TICKET_COLLECTION_ID` + `IERC2981_ID` (collection); `IIP_TICKET_COLLECTION_FACTORY_ID` (factory) |
+| `access_semantics` | Current balance of the ticket id inside its validity window |
+| `marketplace_visibility` | Display and list as ERC1155 tickets |
+| `metadata_uri_policy` | `ipfs://` or `ar://` (per ticket); collection `base_uri` free-form |
+| `src5_interface_id` | `IIP_TICKET_COLLECTION_ID` + `IERC2981_ID` + `IERC1155_METADATA_URI_ID` (collection); `IIP_TICKET_COLLECTION_FACTORY_ID` (factory) |
 
 ## Features
 
 - One deployed `IPTicketCollection` per creator, via the ownerless
-  `IPTicketCollectionFactory` — same shape as every other Medialane
-  per-creator NFT contract, so tickets are tradeable and indexable like any
-  other asset.
-- Owner-gated ticket collection creation inside each deployed collection.
-- ERC-721 tickets.
-- Transferable tickets where access moves with ownership.
-- Ticket redemption.
-- Expiration-based access.
-- Free or ERC-20 paid ticket collections.
-- Direct payment to the collection owner.
-- `safe_mint` ticket issuance.
-- Content-addressed ticket collection metadata.
-- ERC-721 `token_uri` returns the ticket collection metadata.
-- ERC-2981-style `royaltyInfo`.
+  `IPTicketCollectionFactory` — the same shape as every other per-creator NFT
+  contract, so tickets are tradeable and indexable like any other asset.
+- Owner-gated ticket creation and minting inside each deployed collection.
+- ERC-1155 tickets — one token id per ticket, sequential from 1, each with its
+  own supply cap.
+- Optional validity window per ticket (`start_time` / `end_time`, both
+  optional); minting and validity respect it.
+- `is_valid(token_id, holder)` — the on-chain door check: balance > 0 and
+  inside the window.
+- Content-addressed per-ticket metadata; `uri(token_id)` returns it.
+- Collection identity on-chain: `name()`, `symbol()`, `base_uri()`.
+- ERC-2981-style royalties per ticket, paid to the collection owner.
 - SRC5 service interface detection.
 
 ## Interface
@@ -71,64 +75,61 @@ This service follows the shared doctrine in [`docs/SERVICE_ASSET_DOCTRINE.md`](.
 ```cairo
 fn collection_class_hash() -> ClassHash;
 fn version() -> ByteArray;
-fn deploy_ticket_collection(name: ByteArray, symbol: ByteArray) -> ContractAddress;
+fn deploy_collection(name: ByteArray, symbol: ByteArray, base_uri: ByteArray) -> ContractAddress;
 ```
 
-`IPTicketCollection` (one per creator, deployed by the factory):
+`IPTicketCollection` (one per creator, deployed by the factory), on top of
+standard ERC-1155 + SRC5 + Ownable:
 
 ```cairo
-fn create_ticket_collection(
-    price: u256,
+fn create_ticket(
     max_supply: u256,
-    expiration: u64,
-    royalty_bps: u256,
-    payment_token: Option<ContractAddress>,
+    start_time: Option<u64>,
+    end_time: Option<u64>,
+    royalty_bps: u16,
     metadata_uri: ByteArray,
-) -> u256; // owner only
+) -> u256; // owner only — returns the new ticket's token id
 
-fn set_collection_active(collection_id: u256, active: bool); // owner only
-fn mint_ticket(collection_id: u256, recipient: ContractAddress) -> u256; // caller pays, recipient receives
-fn redeem_ticket(token_id: u256);
+fn mint(to: ContractAddress, token_id: u256, amount: u256); // owner only
 
-fn has_valid_ticket(user: ContractAddress, collection_id: u256) -> bool;
-fn get_ticket_collection(collection_id: u256) -> TicketCollection;
-fn get_ticket_data(token_id: u256) -> TicketData;
-fn get_ticket_collection_id(token_id: u256) -> u256;
-fn get_active_ticket_balance(user: ContractAddress, collection_id: u256) -> u256;
-fn get_last_collection_id() -> u256;
-fn total_minted() -> u256;
-fn version() -> ByteArray;
+fn is_valid(token_id: u256, holder: ContractAddress) -> bool;
+fn get_ticket(token_id: u256) -> Ticket;
+
+fn name() -> ByteArray;
+fn symbol() -> ByteArray;
+fn base_uri() -> ByteArray;
+
 fn royalty_info(token_id: u256, sale_price: u256) -> (ContractAddress, u256);
 fn royaltyInfo(token_id: u256, sale_price: u256) -> (ContractAddress, u256);
+fn version() -> ByteArray;
 ```
 
-Custom SRC5 interface IDs (the collection also registers `IERC2981_ID` and the
-`ILICENSED_COLLECTION_ID` programmable-license discovery marker):
+Custom SRC5 interface IDs:
 
 ```cairo
-// starknet_keccak("mediolano.ip-ticket-collection.v2")
+// starknet_keccak("mediolano.ip-ticket-collection")
 IIP_TICKET_COLLECTION_ID =
-0x1ef1511f39449df0a0c686da9bc0759e7c75ad8eb0da68c53ac14093a6ea757
+0x3fa3bcc658b1652be19ff630d5e6f577335cf31baa2c520c0dd8694a64f5711
 
+// starknet_keccak("mediolano.ip-ticket-collection-factory")
 IIP_TICKET_COLLECTION_FACTORY_ID =
-0x27717c17c18e684321a4326345c6ee264d3a91a7b6f1b54e02de0332fb76f58
+0x6d61010de9cb760487aa7a674953e17e9bcb4e1e5a1db1cc54177420f14a22
 ```
 
 ## Access Semantics
 
-A user has valid access when:
+A holder has a valid ticket when:
 
 ```text
-collection.creator != 0
-&& get_block_timestamp() < collection.expiration
-&& active_ticket_balance[(user, collection_id)] > 0
+ticket.max_supply != 0
+&& balance_of(holder, token_id) > 0
+&& (ticket.start_time is None || now >= start_time)
+&& (ticket.end_time is None   || now <  end_time)
 ```
 
-Transfers move active access for unredeemed tickets. **Redeemed or expired
-tickets remain transferable ERC-721 assets but no longer grant access** —
-marketplaces and buyers must check `get_ticket_data(token_id).valid` before
-pricing a secondary sale. Deactivating a ticket collection blocks minting
-only.
+Transfers move validity with ownership. A ticket with no window is always
+valid while held. Applications decide what presenting a valid ticket unlocks —
+the contract provides the verifiable primitive.
 
 ## Development
 
@@ -148,7 +149,8 @@ Tested baseline:
 
 ## Status
 
-Deployed to Starknet mainnet 2026-07-02. `IPTicketCollectionFactory`:
-`0x0664c2d6a4da9ee3ff053ceeba7579c01f2fedfd9d2b57b4c07af3734bd4acab`,
+Deployed to Starknet mainnet 2026-07-14 (on-chain `version()` == "4.0.0").
+`IPTicketCollectionFactory`:
+`0x059802639b41e9c6449c3d557703e610ef639a91866dc1dd44216f9f37111ac5`,
 `IPTicketCollection` class hash:
-`0x086f59c416e365e2bee4ceff9f1dcb96198f2342d50ba4621f60b831863adb6`.
+`0x047bd108881457c4f4db6c64671c1dd402f4d8c79fd9182f03a2dd841335a34b`.

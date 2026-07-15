@@ -19,23 +19,18 @@ pub struct SponsorshipOffer {
     pub royalty_bps: u256,
 }
 
-/// The on-chain facts of an issued sponsorship license. Stored per-token on
-/// IPSponsorshipLicense; the current holder is the token's ERC-721 owner.
-/// The human/machine-readable terms live in the content-addressed
-/// license_terms_uri metadata (the token's URI). transferable and
-/// expires_at are declarative — read by is_license_valid() and by
-/// integrators, never enforced against a transfer.
+/// The on-chain record for an issued sponsorship license — the current
+/// holder is the token's ERC-721 owner. Only what a real, atomic mechanism
+/// needs stays on-chain: the royalty receiver/rate (EIP-2981, enforced at
+/// marketplace trade time) and the token's own metadata URI. Everything
+/// else about the deal — the licensed asset, its expiry, its transferable
+/// intent — is declarative, carried in that same URI's metadata and in the
+/// LicenseMinted event, never contract-enforced state (license terms are
+/// data, not an on-chain entity).
 #[derive(Drop, Serde, starknet::Store, Clone)]
-pub struct LicenseData {
+pub struct LicenseRecord {
     /// The IP author who issued the license (royalty recipient on resale).
     pub author: ContractAddress,
-    /// The licensed IP asset.
-    pub asset_contract: ContractAddress,
-    pub asset_token_id: u256,
-    /// License validity end (unix seconds), read by is_license_valid().
-    pub expires_at: u64,
-    /// The issuing author's declared intent (set from the offer/proposal).
-    pub transferable: bool,
     /// EIP-2981 royalty to the author on license resale, basis points.
     pub royalty_bps: u256,
     /// Content-addressed license terms (ipfs:// or ar://) — the token URI.

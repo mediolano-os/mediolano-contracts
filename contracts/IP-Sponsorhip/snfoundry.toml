@@ -4,7 +4,7 @@
 [sncast.default]
 url = "https://starknet-mainnet.g.alchemy.com/starknet/version/rpc/v0_10/5Kaw8bJUF3QFKknr4N6Uo"
 accounts-file = "~/.starknet_accounts/starknet_open_zeppelin_accounts.json"
-account = "medialane-mainnet-deployer"
+account = "medialane-deployer"
 wait-params = { timeout = 300, retry-interval = 10 }
 block-explorer = "Voyager"
 show-explorer-links = true

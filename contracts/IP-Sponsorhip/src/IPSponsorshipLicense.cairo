@@ -12,8 +12,8 @@ pub mod IPSponsorshipLicense {
     use core::num::traits::Zero;
     use openzeppelin_introspection::src5::SRC5Component;
     use openzeppelin_token::common::erc2981::interface::IERC2981_ID;
-    use openzeppelin_token::erc721::ERC721Component;
     use openzeppelin_token::erc721::interface::{IERC721Metadata, IERC721MetadataCamelOnly};
+    use openzeppelin_token::erc721::{ERC721Component, ERC721HooksEmptyImpl};
     use starknet::storage::{
         Map, StorageMapReadAccess, StorageMapWriteAccess, StoragePointerReadAccess,
         StoragePointerWriteAccess,
@@ -86,22 +86,6 @@ pub mod IPSponsorshipLicense {
         self.src5.register_interface(IIP_SPONSORSHIP_LICENSE_ID);
         self.src5.register_interface(IERC2981_ID);
         self.src5.register_interface(ILICENSED_COLLECTION_ID);
-    }
-
-    impl ERC721HooksImpl of ERC721Component::ERC721HooksTrait<ContractState> {
-        fn before_update(
-            ref self: ERC721Component::ComponentState<ContractState>,
-            to: ContractAddress,
-            token_id: u256,
-            auth: ContractAddress,
-        ) {}
-
-        fn after_update(
-            ref self: ERC721Component::ComponentState<ContractState>,
-            to: ContractAddress,
-            token_id: u256,
-            auth: ContractAddress,
-        ) {}
     }
 
     #[abi(embed_v0)]

@@ -7,6 +7,9 @@
 // proposals are allowance-based — no escrow, the contract never holds
 // funds; on acceptance, payment settles sponsor → author directly and a
 // license mints as a standard ERC-721 on IPSponsorshipLicense, atomically.
+// Retracting a bid or withdrawing a proposal is advisory against an
+// acceptance in flight in the same block; revoking the ERC-20 allowance is
+// the guaranteed cancel, as acceptance settles against that allowance.
 // An issued license cannot be revoked by anyone — it runs to its expiry.
 // No contract owner, no admin, no fee.
 #[starknet::contract]
@@ -23,9 +26,7 @@ pub mod IPSponsorship {
         IIPSponsorship, IIPSponsorshipLicenseDispatcher, IIPSponsorshipLicenseDispatcherTrait,
         IIP_SPONSORSHIP_ID,
     };
-    use crate::types::{
-        LicenseData, SponsorshipOffer, SponsorshipProposal, bytearray_starts_with,
-    };
+    use crate::types::{LicenseData, SponsorshipOffer, SponsorshipProposal, bytearray_starts_with};
 
     component!(path: SRC5Component, storage: src5, event: SRC5Event);
 
@@ -135,6 +136,7 @@ pub mod IPSponsorship {
         pub token_id: u256,
         pub amount: u256,
         pub duration: u64,
+        pub valid_until: u64,
         pub payment_token: ContractAddress,
         pub license_terms_uri: ByteArray,
         pub transferable: bool,
@@ -310,8 +312,7 @@ pub mod IPSponsorship {
             self.offers.entry(offer_id).write(offer.clone());
             self.bids.entry((offer_id, sponsor)).write(0);
 
-            let expires_at = get_block_timestamp() + offer.duration;
-            let license_id = self
+            let (license_id, expires_at) = self
                 .settle_and_mint(
                     caller,
                     sponsor,
@@ -341,6 +342,7 @@ pub mod IPSponsorship {
             token_id: u256,
             amount: u256,
             duration: u64,
+            valid_until: u64,
             payment_token: ContractAddress,
             license_terms_uri: ByteArray,
             transferable: bool,
@@ -350,6 +352,7 @@ pub mod IPSponsorship {
             assert(!proposer.is_zero(), 'Proposer is zero address');
             assert(duration > 0, 'Duration cannot be zero');
             assert(amount > 0, 'Amount cannot be zero');
+            assert(valid_until == 0 || valid_until > get_block_timestamp(), 'Deadline in the past');
             assert(!payment_token.is_zero(), 'Payment token is zero');
             assert(!nft_contract.is_zero(), 'NFT contract is zero');
             assert(royalty_bps <= 10000, 'Royalty exceeds 10000');
@@ -368,6 +371,7 @@ pub mod IPSponsorship {
                         token_id,
                         amount,
                         duration,
+                        valid_until,
                         payment_token,
                         license_terms_uri: license_terms_uri.clone(),
                         transferable,
@@ -386,6 +390,7 @@ pub mod IPSponsorship {
                         token_id,
                         amount,
                         duration,
+                        valid_until,
                         payment_token,
                         license_terms_uri,
                         transferable,
@@ -418,11 +423,13 @@ pub mod IPSponsorship {
             assert(!proposal.proposer.is_zero(), 'Proposal does not exist');
             assert(proposal.open, 'Proposal not open');
 
+            // Effects before interactions: close before the external
+            // ownership read; a failing assert reverts the write.
+            proposal.open = false;
+            self.proposals.entry(proposal_id).write(proposal.clone());
+
             let nft = IERC721Dispatcher { contract_address: proposal.nft_contract };
             assert(nft.owner_of(proposal.token_id) == get_caller_address(), 'Not IP owner');
-
-            proposal.open = false;
-            self.proposals.entry(proposal_id).write(proposal);
 
             self
                 .emit(
@@ -437,12 +444,13 @@ pub mod IPSponsorship {
             let mut proposal = self.proposals.entry(proposal_id).read();
             assert(!proposal.proposer.is_zero(), 'Proposal does not exist');
             assert(proposal.open, 'Proposal not open');
+            let now = get_block_timestamp();
+            assert(proposal.valid_until == 0 || now <= proposal.valid_until, 'Proposal expired');
 
             proposal.open = false;
             self.proposals.entry(proposal_id).write(proposal.clone());
 
-            let expires_at = get_block_timestamp() + proposal.duration;
-            let license_id = self
+            let (license_id, expires_at) = self
                 .settle_and_mint(
                     caller,
                     proposal.proposer,
@@ -456,6 +464,7 @@ pub mod IPSponsorship {
                     proposal.license_terms_uri.clone(),
                 );
 
+            self.emit(ProposalClosed { proposal_id, accepted: true, closed_at: now });
             self
                 .emit(
                     ProposalAccepted {
@@ -532,6 +541,7 @@ pub mod IPSponsorship {
         // payment settles sponsor → author directly against the allowance
         // the sponsor holds open, and the license mints to the sponsor —
         // all atomically, so a failing transfer reverts the mint too.
+        // Returns (license_id, expires_at).
         fn settle_and_mint(
             ref self: ContractState,
             author: ContractAddress,
@@ -544,7 +554,7 @@ pub mod IPSponsorship {
             transferable: bool,
             royalty_bps: u256,
             license_terms_uri: ByteArray,
-        ) -> u256 {
+        ) -> (u256, u64) {
             let nft = IERC721Dispatcher { contract_address: nft_contract };
             assert(nft.owner_of(token_id) == author, 'Not IP owner');
 
@@ -567,7 +577,7 @@ pub mod IPSponsorship {
             let result = token.transfer_from(sponsor, author, amount);
             assert(result, 'Token Transfer Failed');
 
-            license_id
+            (license_id, expires_at)
         }
     }
 }

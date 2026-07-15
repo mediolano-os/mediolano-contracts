@@ -46,18 +46,23 @@ pub trait IIPSponsorship<TContractState> {
     fn get_license_contract(self: @TContractState) -> ContractAddress;
     // A sponsor proposes terms on an asset with no open offer yet — the
     // symmetric counterpart to create_offer. Any caller may propose; only
-    // the asset's current owner may accept or reject.
+    // the asset's current owner may accept or reject. valid_until is an
+    // acceptance deadline (unix seconds; 0 = no deadline).
     fn propose_sponsorship(
         ref self: TContractState,
         nft_contract: ContractAddress,
         token_id: u256,
         amount: u256,
         duration: u64,
+        valid_until: u64,
         payment_token: ContractAddress,
         license_terms_uri: ByteArray,
         transferable: bool,
         royalty_bps: u256,
     ) -> u256;
+    // Withdrawal (like bid retraction) is advisory against an in-flight
+    // acceptance in the same block — revoking the ERC-20 allowance is the
+    // guaranteed cancel, as acceptance settles against that allowance.
     fn withdraw_proposal(ref self: TContractState, proposal_id: u256);
     fn accept_proposal(ref self: TContractState, proposal_id: u256) -> u256;
     fn reject_proposal(ref self: TContractState, proposal_id: u256);

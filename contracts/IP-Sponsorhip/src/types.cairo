@@ -45,7 +45,9 @@ pub struct LicenseData {
 // A sponsor-initiated proposal on an asset with no open offer yet — the
 // symmetric counterpart to SponsorshipOffer. Existence: `proposer != 0`.
 // `open` gates acceptance/rejection; a withdrawn or accepted proposal is
-// closed and cannot be reopened — a new one is proposed instead.
+// closed and cannot be reopened — a new one is proposed instead. The
+// proposal binds to the asset, not a person: whoever owns the asset at
+// acceptance time is the author who is paid and issues the license.
 #[derive(Drop, Serde, starknet::Store, Clone)]
 pub struct SponsorshipProposal {
     pub proposer: ContractAddress,
@@ -53,6 +55,9 @@ pub struct SponsorshipProposal {
     pub token_id: u256,
     pub amount: u256,
     pub duration: u64,
+    /// Acceptance deadline (unix seconds; 0 = no deadline). An expired
+    /// proposal can no longer be accepted.
+    pub valid_until: u64,
     pub payment_token: ContractAddress,
     pub license_terms_uri: ByteArray,
     pub transferable: bool,

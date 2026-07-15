@@ -1,15 +1,15 @@
 use starknet::ContractAddress;
-use crate::types::{LicenseData, SponsorshipOffer};
+use crate::types::{LicenseData, SponsorshipOffer, SponsorshipProposal};
 
 // Protocol discovery ID registered via SRC5.
-// Derivation: starknet_keccak("mediolano.ip-sponsorship.v2").
+// Derivation: starknet_keccak("mediolano.ip-sponsorship.v3").
 pub const IIP_SPONSORSHIP_ID: felt252 =
-    0x0034e46e7acd46043d30df2ef53d27bbb6b7636b61c4e27e989e3bee5575bba5;
+    0x2acdd68e9e446816f8a4f4667264ce04d0bc9b85a519f7db14c0cf08a606ef3;
 
-// The sponsorship license as a standard, optionally transferable ERC-721.
-// Derivation: starknet_keccak("mediolano.ip-sponsorship-license.v1").
+// The sponsorship license as a standard, freely transferable ERC-721.
+// Derivation: starknet_keccak("mediolano.ip-sponsorship-license.v2").
 pub const IIP_SPONSORSHIP_LICENSE_ID: felt252 =
-    0x1a3bb9f33f57c7927ea7188d4a7f91ec8e4b801879f3cfc5be7722ac04c9cc7;
+    0xb14de94286e27cd2927d0c2bad0718857f9ad194efacfa09eb639e4dc5c190;
 
 // Marks a collection whose metadata JSON carries the Mediolano programmable
 // license trait schema (License, Commercial Use, Derivatives, Attribution,
@@ -44,6 +44,25 @@ pub trait IIPSponsorship<TContractState> {
     fn get_last_offer_id(self: @TContractState) -> u256;
     fn get_last_license_id(self: @TContractState) -> u256;
     fn get_license_contract(self: @TContractState) -> ContractAddress;
+    // A sponsor proposes terms on an asset with no open offer yet — the
+    // symmetric counterpart to create_offer. Any caller may propose; only
+    // the asset's current owner may accept or reject.
+    fn propose_sponsorship(
+        ref self: TContractState,
+        nft_contract: ContractAddress,
+        token_id: u256,
+        amount: u256,
+        duration: u64,
+        payment_token: ContractAddress,
+        license_terms_uri: ByteArray,
+        transferable: bool,
+        royalty_bps: u256,
+    ) -> u256;
+    fn withdraw_proposal(ref self: TContractState, proposal_id: u256);
+    fn accept_proposal(ref self: TContractState, proposal_id: u256) -> u256;
+    fn reject_proposal(ref self: TContractState, proposal_id: u256);
+    fn get_proposal(self: @TContractState, proposal_id: u256) -> SponsorshipProposal;
+    fn get_last_proposal_id(self: @TContractState) -> u256;
     fn version(self: @TContractState) -> ByteArray;
 }
 

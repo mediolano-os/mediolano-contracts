@@ -22,7 +22,9 @@ pub struct SponsorshipOffer {
 /// The on-chain facts of an issued sponsorship license. Stored per-token on
 /// IPSponsorshipLicense; the current holder is the token's ERC-721 owner.
 /// The human/machine-readable terms live in the content-addressed
-/// license_terms_uri metadata (the token's URI).
+/// license_terms_uri metadata (the token's URI). transferable and
+/// expires_at are declarative — read by is_license_valid() and by
+/// integrators, never enforced against a transfer.
 #[derive(Drop, Serde, starknet::Store, Clone)]
 pub struct LicenseData {
     /// The IP author who issued the license (royalty recipient on resale).
@@ -30,15 +32,32 @@ pub struct LicenseData {
     /// The licensed IP asset.
     pub asset_contract: ContractAddress,
     pub asset_token_id: u256,
-    /// License validity end (unix seconds). Expiry is contract-enforced:
-    /// an expired license cannot transfer and reads as invalid.
+    /// License validity end (unix seconds), read by is_license_valid().
     pub expires_at: u64,
-    /// Whether the holder may transfer the license (set from the offer).
+    /// The issuing author's declared intent (set from the offer/proposal).
     pub transferable: bool,
     /// EIP-2981 royalty to the author on license resale, basis points.
     pub royalty_bps: u256,
     /// Content-addressed license terms (ipfs:// or ar://) — the token URI.
     pub license_terms_uri: ByteArray,
+}
+
+// A sponsor-initiated proposal on an asset with no open offer yet — the
+// symmetric counterpart to SponsorshipOffer. Existence: `proposer != 0`.
+// `open` gates acceptance/rejection; a withdrawn or accepted proposal is
+// closed and cannot be reopened — a new one is proposed instead.
+#[derive(Drop, Serde, starknet::Store, Clone)]
+pub struct SponsorshipProposal {
+    pub proposer: ContractAddress,
+    pub nft_contract: ContractAddress,
+    pub token_id: u256,
+    pub amount: u256,
+    pub duration: u64,
+    pub payment_token: ContractAddress,
+    pub license_terms_uri: ByteArray,
+    pub transferable: bool,
+    pub open: bool,
+    pub royalty_bps: u256,
 }
 
 pub fn bytearray_starts_with(haystack: @ByteArray, needle: @ByteArray) -> bool {

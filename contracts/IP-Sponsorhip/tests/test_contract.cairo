@@ -1,3 +1,6 @@
+use ip_sponsorship::IPSponsorship::IPSponsorship::{
+    Event as SponsorshipEvent, ProposalAccepted, ProposalClosed,
+};
 use ip_sponsorship::IPSponsorshipLicense::IPSponsorshipLicense::{Event, LicenseMinted};
 use ip_sponsorship::interface::{
     IIPSponsorshipDispatcher, IIPSponsorshipDispatcherTrait, IIPSponsorshipLicenseDispatcher,
@@ -481,8 +484,10 @@ fn test_transferable_license_moves_via_standard_transfer() {
 }
 
 #[test]
-#[should_panic(expected: 'License not transferable')]
-fn test_nontransferable_license_blocks_transfer() {
+fn test_nontransferable_expired_license_still_transfers() {
+    // A `transferable: false`, already-expired license carries those facts
+    // as declarative terms only — the contract never gates a transfer on
+    // them.
     let (sponsorship, license_nft) = deploy_sponsorship_pair();
     let token = deploy_erc20();
     let nft = deploy_ip_nft_for(AUTHOR());
@@ -496,25 +501,6 @@ fn test_nontransferable_license_blocks_transfer() {
     cheat_caller_address(sponsorship.contract_address, SPONSOR1(), CheatSpan::TargetCalls(1));
     sponsorship.place_bid(offer_id, 250);
     fund_and_approve(token, SPONSOR1(), sponsorship.contract_address, 250);
-    cheat_caller_address(sponsorship.contract_address, AUTHOR(), CheatSpan::TargetCalls(1));
-    let license_id = sponsorship.accept_bid(offer_id, SPONSOR1());
-
-    let erc721 = IERC721Dispatcher { contract_address: license_nft.contract_address };
-    cheat_caller_address(license_nft.contract_address, SPONSOR1(), CheatSpan::TargetCalls(1));
-    erc721.transfer_from(SPONSOR1(), SPONSOR2(), license_id);
-}
-
-#[test]
-#[should_panic(expected: 'License expired')]
-fn test_expired_license_cannot_transfer() {
-    let (sponsorship, license_nft) = deploy_sponsorship_pair();
-    let token = deploy_erc20();
-    let nft = deploy_ip_nft_for(AUTHOR());
-    let offer_id = create_offer(sponsorship, nft, token.contract_address);
-
-    cheat_caller_address(sponsorship.contract_address, SPONSOR1(), CheatSpan::TargetCalls(1));
-    sponsorship.place_bid(offer_id, 250);
-    fund_and_approve(token, SPONSOR1(), sponsorship.contract_address, 250);
     cheat_block_timestamp(sponsorship.contract_address, 1000, CheatSpan::TargetCalls(1));
     cheat_caller_address(sponsorship.contract_address, AUTHOR(), CheatSpan::TargetCalls(1));
     let license_id = sponsorship.accept_bid(offer_id, SPONSOR1());
@@ -523,6 +509,11 @@ fn test_expired_license_cannot_transfer() {
     let erc721 = IERC721Dispatcher { contract_address: license_nft.contract_address };
     cheat_caller_address(license_nft.contract_address, SPONSOR1(), CheatSpan::TargetCalls(1));
     erc721.transfer_from(SPONSOR1(), SPONSOR2(), license_id);
+
+    assert(erc721.owner_of(license_id) == SPONSOR2(), 'transfer should have succeeded');
+    // is_license_valid is an informational read, independent of transfer.
+    cheat_block_timestamp(license_nft.contract_address, 1001 + DAY, CheatSpan::TargetCalls(1));
+    assert(!sponsorship.is_license_valid(license_id), 'should read as expired');
 }
 
 #[test]
@@ -668,8 +659,8 @@ fn test_missing_license_reverts() {
 #[test]
 fn test_version_views() {
     let (sponsorship, license_nft) = deploy_sponsorship_pair();
-    assert(sponsorship.version() == "2.0.0", 'sponsorship version');
-    assert(license_nft.version() == "2.0.0", 'license version');
+    assert(sponsorship.version() == "3.0.0", 'sponsorship version');
+    assert(license_nft.version() == "3.0.0", 'license version');
 }
 
 #[test]
@@ -710,6 +701,334 @@ fn test_license_minted_event_carries_royalty_and_terms() {
                             royalty_bps: 500,
                             license_terms_uri: TERMS_URI(),
                             minted_at: 0,
+                        },
+                    ),
+                ),
+            ],
+        );
+}
+
+// --- sponsor-initiated proposals ---
+
+#[test]
+fn test_propose_sponsorship_then_owner_accepts() {
+    let (sponsorship, license_nft) = deploy_sponsorship_pair();
+    let token = deploy_erc20();
+    let nft = deploy_ip_nft_for(AUTHOR());
+    fund_and_approve(token, SPONSOR1(), sponsorship.contract_address, 250);
+
+    cheat_caller_address(sponsorship.contract_address, SPONSOR1(), CheatSpan::TargetCalls(1));
+    let proposal_id = sponsorship
+        .propose_sponsorship(
+            nft, IP_TOKEN, 250, DAY, 0, token.contract_address, TERMS_URI(), true, 500,
+        );
+
+    cheat_caller_address(sponsorship.contract_address, AUTHOR(), CheatSpan::TargetCalls(1));
+    let license_id = sponsorship.accept_proposal(proposal_id);
+
+    let erc721 = IERC721Dispatcher { contract_address: license_nft.contract_address };
+    assert(erc721.owner_of(license_id) == SPONSOR1(), 'sponsor should hold license');
+    assert(token.balance_of(AUTHOR()) == 250, 'author should be paid');
+    assert(!sponsorship.get_proposal(proposal_id).open, 'proposal should be closed');
+}
+
+#[test]
+#[should_panic(expected: 'Not IP owner')]
+fn test_accept_proposal_reverts_for_non_owner() {
+    let (sponsorship, _) = deploy_sponsorship_pair();
+    let token = deploy_erc20();
+    let nft = deploy_ip_nft_for(AUTHOR());
+    fund_and_approve(token, SPONSOR1(), sponsorship.contract_address, 250);
+
+    cheat_caller_address(sponsorship.contract_address, SPONSOR1(), CheatSpan::TargetCalls(1));
+    let proposal_id = sponsorship
+        .propose_sponsorship(
+            nft, IP_TOKEN, 250, DAY, 0, token.contract_address, TERMS_URI(), true, 0,
+        );
+
+    cheat_caller_address(sponsorship.contract_address, OUTSIDER(), CheatSpan::TargetCalls(1));
+    sponsorship.accept_proposal(proposal_id);
+}
+
+#[test]
+fn test_withdraw_proposal_closes_it() {
+    let (sponsorship, _) = deploy_sponsorship_pair();
+    let token = deploy_erc20();
+    let nft = deploy_ip_nft_for(AUTHOR());
+
+    cheat_caller_address(sponsorship.contract_address, SPONSOR1(), CheatSpan::TargetCalls(1));
+    let proposal_id = sponsorship
+        .propose_sponsorship(
+            nft, IP_TOKEN, 250, DAY, 0, token.contract_address, TERMS_URI(), true, 0,
+        );
+    cheat_caller_address(sponsorship.contract_address, SPONSOR1(), CheatSpan::TargetCalls(1));
+    sponsorship.withdraw_proposal(proposal_id);
+
+    assert(!sponsorship.get_proposal(proposal_id).open, 'proposal should be closed');
+}
+
+#[test]
+#[should_panic(expected: 'Only proposer')]
+fn test_withdraw_proposal_rejects_non_proposer() {
+    let (sponsorship, _) = deploy_sponsorship_pair();
+    let token = deploy_erc20();
+    let nft = deploy_ip_nft_for(AUTHOR());
+
+    cheat_caller_address(sponsorship.contract_address, SPONSOR1(), CheatSpan::TargetCalls(1));
+    let proposal_id = sponsorship
+        .propose_sponsorship(
+            nft, IP_TOKEN, 250, DAY, 0, token.contract_address, TERMS_URI(), true, 0,
+        );
+    cheat_caller_address(sponsorship.contract_address, OUTSIDER(), CheatSpan::TargetCalls(1));
+    sponsorship.withdraw_proposal(proposal_id);
+}
+
+#[test]
+fn test_reject_proposal_by_owner_closes_it() {
+    let (sponsorship, _) = deploy_sponsorship_pair();
+    let token = deploy_erc20();
+    let nft = deploy_ip_nft_for(AUTHOR());
+
+    cheat_caller_address(sponsorship.contract_address, SPONSOR1(), CheatSpan::TargetCalls(1));
+    let proposal_id = sponsorship
+        .propose_sponsorship(
+            nft, IP_TOKEN, 250, DAY, 0, token.contract_address, TERMS_URI(), true, 0,
+        );
+    cheat_caller_address(sponsorship.contract_address, AUTHOR(), CheatSpan::TargetCalls(1));
+    sponsorship.reject_proposal(proposal_id);
+
+    assert(!sponsorship.get_proposal(proposal_id).open, 'proposal should be closed');
+}
+
+#[test]
+#[should_panic(expected: 'Proposal not open')]
+fn test_accept_proposal_reverts_after_withdrawal() {
+    let (sponsorship, _) = deploy_sponsorship_pair();
+    let token = deploy_erc20();
+    let nft = deploy_ip_nft_for(AUTHOR());
+    fund_and_approve(token, SPONSOR1(), sponsorship.contract_address, 250);
+
+    cheat_caller_address(sponsorship.contract_address, SPONSOR1(), CheatSpan::TargetCalls(1));
+    let proposal_id = sponsorship
+        .propose_sponsorship(
+            nft, IP_TOKEN, 250, DAY, 0, token.contract_address, TERMS_URI(), true, 0,
+        );
+    cheat_caller_address(sponsorship.contract_address, SPONSOR1(), CheatSpan::TargetCalls(1));
+    sponsorship.withdraw_proposal(proposal_id);
+
+    cheat_caller_address(sponsorship.contract_address, AUTHOR(), CheatSpan::TargetCalls(1));
+    sponsorship.accept_proposal(proposal_id);
+}
+
+fn propose(
+    sponsorship: IIPSponsorshipDispatcher, nft: ContractAddress, token: ContractAddress,
+) -> u256 {
+    cheat_caller_address(sponsorship.contract_address, SPONSOR1(), CheatSpan::TargetCalls(1));
+    sponsorship.propose_sponsorship(nft, IP_TOKEN, 250, DAY, 0, token, TERMS_URI(), true, 0)
+}
+
+#[test]
+#[should_panic(expected: 'Not IP owner')]
+fn test_reject_proposal_rejects_non_owner() {
+    let (sponsorship, _) = deploy_sponsorship_pair();
+    let token = deploy_erc20();
+    let nft = deploy_ip_nft_for(AUTHOR());
+    let proposal_id = propose(sponsorship, nft, token.contract_address);
+
+    cheat_caller_address(sponsorship.contract_address, OUTSIDER(), CheatSpan::TargetCalls(1));
+    sponsorship.reject_proposal(proposal_id);
+}
+
+#[test]
+#[should_panic(expected: 'Proposal not open')]
+fn test_accept_proposal_reverts_after_reject() {
+    let (sponsorship, _) = deploy_sponsorship_pair();
+    let token = deploy_erc20();
+    let nft = deploy_ip_nft_for(AUTHOR());
+    fund_and_approve(token, SPONSOR1(), sponsorship.contract_address, 250);
+    let proposal_id = propose(sponsorship, nft, token.contract_address);
+
+    cheat_caller_address(sponsorship.contract_address, AUTHOR(), CheatSpan::TargetCalls(1));
+    sponsorship.reject_proposal(proposal_id);
+
+    cheat_caller_address(sponsorship.contract_address, AUTHOR(), CheatSpan::TargetCalls(1));
+    sponsorship.accept_proposal(proposal_id);
+}
+
+#[test]
+#[should_panic(expected: 'Proposal not open')]
+fn test_withdraw_proposal_reverts_after_accept() {
+    let (sponsorship, _) = deploy_sponsorship_pair();
+    let token = deploy_erc20();
+    let nft = deploy_ip_nft_for(AUTHOR());
+    fund_and_approve(token, SPONSOR1(), sponsorship.contract_address, 250);
+    let proposal_id = propose(sponsorship, nft, token.contract_address);
+
+    cheat_caller_address(sponsorship.contract_address, AUTHOR(), CheatSpan::TargetCalls(1));
+    sponsorship.accept_proposal(proposal_id);
+
+    cheat_caller_address(sponsorship.contract_address, SPONSOR1(), CheatSpan::TargetCalls(1));
+    sponsorship.withdraw_proposal(proposal_id);
+}
+
+#[test]
+#[should_panic(expected: 'Amount cannot be zero')]
+fn test_propose_rejects_zero_amount() {
+    let (sponsorship, _) = deploy_sponsorship_pair();
+    let token = deploy_erc20();
+    let nft = deploy_ip_nft_for(AUTHOR());
+
+    cheat_caller_address(sponsorship.contract_address, SPONSOR1(), CheatSpan::TargetCalls(1));
+    sponsorship
+        .propose_sponsorship(
+            nft, IP_TOKEN, 0, DAY, 0, token.contract_address, TERMS_URI(), true, 0,
+        );
+}
+
+#[test]
+#[should_panic(expected: 'Duration cannot be zero')]
+fn test_propose_rejects_zero_duration() {
+    let (sponsorship, _) = deploy_sponsorship_pair();
+    let token = deploy_erc20();
+    let nft = deploy_ip_nft_for(AUTHOR());
+
+    cheat_caller_address(sponsorship.contract_address, SPONSOR1(), CheatSpan::TargetCalls(1));
+    sponsorship
+        .propose_sponsorship(
+            nft, IP_TOKEN, 250, 0, 0, token.contract_address, TERMS_URI(), true, 0,
+        );
+}
+
+#[test]
+#[should_panic(expected: 'URI must be ipfs:// or ar://')]
+fn test_propose_rejects_http_terms() {
+    let (sponsorship, _) = deploy_sponsorship_pair();
+    let token = deploy_erc20();
+    let nft = deploy_ip_nft_for(AUTHOR());
+
+    cheat_caller_address(sponsorship.contract_address, SPONSOR1(), CheatSpan::TargetCalls(1));
+    sponsorship
+        .propose_sponsorship(
+            nft, IP_TOKEN, 250, DAY, 0, token.contract_address, HTTP_URI(), true, 0,
+        );
+}
+
+#[test]
+#[should_panic(expected: 'Royalty exceeds 10000')]
+fn test_propose_rejects_bad_royalty() {
+    let (sponsorship, _) = deploy_sponsorship_pair();
+    let token = deploy_erc20();
+    let nft = deploy_ip_nft_for(AUTHOR());
+
+    cheat_caller_address(sponsorship.contract_address, SPONSOR1(), CheatSpan::TargetCalls(1));
+    sponsorship
+        .propose_sponsorship(
+            nft, IP_TOKEN, 250, DAY, 0, token.contract_address, TERMS_URI(), true, 10_001,
+        );
+}
+
+#[test]
+#[should_panic(expected: 'Deadline in the past')]
+fn test_propose_rejects_past_deadline() {
+    let (sponsorship, _) = deploy_sponsorship_pair();
+    let token = deploy_erc20();
+    let nft = deploy_ip_nft_for(AUTHOR());
+
+    cheat_block_timestamp(sponsorship.contract_address, 500, CheatSpan::TargetCalls(1));
+    cheat_caller_address(sponsorship.contract_address, SPONSOR1(), CheatSpan::TargetCalls(1));
+    sponsorship
+        .propose_sponsorship(
+            nft, IP_TOKEN, 250, DAY, 400, token.contract_address, TERMS_URI(), true, 0,
+        );
+}
+
+#[test]
+#[should_panic(expected: 'Proposal expired')]
+fn test_accept_proposal_reverts_after_deadline() {
+    let (sponsorship, _) = deploy_sponsorship_pair();
+    let token = deploy_erc20();
+    let nft = deploy_ip_nft_for(AUTHOR());
+    fund_and_approve(token, SPONSOR1(), sponsorship.contract_address, 250);
+
+    cheat_caller_address(sponsorship.contract_address, SPONSOR1(), CheatSpan::TargetCalls(1));
+    let proposal_id = sponsorship
+        .propose_sponsorship(
+            nft, IP_TOKEN, 250, DAY, 1000, token.contract_address, TERMS_URI(), true, 0,
+        );
+
+    cheat_block_timestamp(sponsorship.contract_address, 1001, CheatSpan::TargetCalls(1));
+    cheat_caller_address(sponsorship.contract_address, AUTHOR(), CheatSpan::TargetCalls(1));
+    sponsorship.accept_proposal(proposal_id);
+}
+
+#[test]
+#[should_panic]
+fn test_accept_proposal_without_allowance_reverts_atomically() {
+    let (sponsorship, _) = deploy_sponsorship_pair();
+    let token = deploy_erc20();
+    let nft = deploy_ip_nft_for(AUTHOR());
+    // Proposer never approved — the proposer's de-facto withdrawal path.
+    let proposal_id = propose(sponsorship, nft, token.contract_address);
+
+    cheat_caller_address(sponsorship.contract_address, AUTHOR(), CheatSpan::TargetCalls(1));
+    sponsorship.accept_proposal(proposal_id);
+}
+
+#[test]
+fn test_new_owner_can_accept_proposal_after_ip_sale() {
+    // A proposal binds to the asset, not a person: whoever owns the asset
+    // at acceptance time is paid and issues the license.
+    let (sponsorship, license_nft) = deploy_sponsorship_pair();
+    let token = deploy_erc20();
+    let nft = deploy_ip_nft_for(AUTHOR());
+    fund_and_approve(token, SPONSOR1(), sponsorship.contract_address, 250);
+    let proposal_id = propose(sponsorship, nft, token.contract_address);
+
+    let ip = IERC721Dispatcher { contract_address: nft };
+    cheat_caller_address(nft, AUTHOR(), CheatSpan::TargetCalls(1));
+    ip.transfer_from(AUTHOR(), SPONSOR2(), IP_TOKEN);
+
+    cheat_caller_address(sponsorship.contract_address, SPONSOR2(), CheatSpan::TargetCalls(1));
+    let license_id = sponsorship.accept_proposal(proposal_id);
+
+    assert(token.balance_of(SPONSOR2()) == 250, 'new owner should be paid');
+    let erc721 = IERC721Dispatcher { contract_address: license_nft.contract_address };
+    assert(erc721.owner_of(license_id) == SPONSOR1(), 'sponsor should hold license');
+    assert(sponsorship.get_license(license_id).author == SPONSOR2(), 'license author is new owner');
+}
+
+#[test]
+fn test_accept_proposal_emits_closed_and_accepted() {
+    let (sponsorship, _) = deploy_sponsorship_pair();
+    let token = deploy_erc20();
+    let nft = deploy_ip_nft_for(AUTHOR());
+    fund_and_approve(token, SPONSOR1(), sponsorship.contract_address, 250);
+    let proposal_id = propose(sponsorship, nft, token.contract_address);
+
+    cheat_block_timestamp(sponsorship.contract_address, 1000, CheatSpan::TargetCalls(1));
+    cheat_caller_address(sponsorship.contract_address, AUTHOR(), CheatSpan::TargetCalls(1));
+    let mut spy = spy_events();
+    let license_id = sponsorship.accept_proposal(proposal_id);
+
+    spy
+        .assert_emitted(
+            @array![
+                (
+                    sponsorship.contract_address,
+                    SponsorshipEvent::ProposalClosed(
+                        ProposalClosed { proposal_id, accepted: true, closed_at: 1000 },
+                    ),
+                ),
+                (
+                    sponsorship.contract_address,
+                    SponsorshipEvent::ProposalAccepted(
+                        ProposalAccepted {
+                            proposal_id,
+                            license_id,
+                            sponsor: SPONSOR1(),
+                            author: AUTHOR(),
+                            amount: 250,
+                            expires_at: 1000 + DAY,
                         },
                     ),
                 ),

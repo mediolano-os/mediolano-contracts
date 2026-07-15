@@ -1,18 +1,19 @@
-// The sponsorship license token: a standard ERC-721 whose holder is the
-// current licensee. Minted only by the IPSponsorship registry when an offer
-// is accepted. Transferability and expiry are properties of each license,
-// enforced in the transfer hook; a transferable, unexpired license moves
-// through ordinary transfer_from/safe_transfer_from and is therefore
-// listable and holdable by any ERC-721-aware wallet, marketplace, or agent.
-// EIP-2981 royalties on resale pay the IP author. Ownerless after the
-// one-time minter bootstrap.
+// The sponsorship license token: a standard, freely transferable ERC-721
+// whose holder is the current licensee. Minted only by the IPSponsorship
+// registry when an offer or proposal is accepted. Listable and holdable by
+// any ERC-721-aware wallet, marketplace, or agent. EIP-2981 royalties on
+// resale pay the IP author. Ownerless after the one-time minter bootstrap.
+// License terms — including whether the issuing author intended the
+// license to be resold, and its expiry — are declarative, carried in
+// license_terms_uri metadata and readable via is_license_valid(); this
+// contract does not enforce them against a transfer.
 #[starknet::contract]
 pub mod IPSponsorshipLicense {
     use core::num::traits::Zero;
     use openzeppelin_introspection::src5::SRC5Component;
     use openzeppelin_token::common::erc2981::interface::IERC2981_ID;
-    use openzeppelin_token::erc721::ERC721Component;
     use openzeppelin_token::erc721::interface::{IERC721Metadata, IERC721MetadataCamelOnly};
+    use openzeppelin_token::erc721::{ERC721Component, ERC721HooksEmptyImpl};
     use starknet::storage::{
         Map, StorageMapReadAccess, StorageMapWriteAccess, StoragePointerReadAccess,
         StoragePointerWriteAccess,
@@ -85,33 +86,6 @@ pub mod IPSponsorshipLicense {
         self.src5.register_interface(IIP_SPONSORSHIP_LICENSE_ID);
         self.src5.register_interface(IERC2981_ID);
         self.src5.register_interface(ILICENSED_COLLECTION_ID);
-    }
-
-    impl ERC721HooksImpl of ERC721Component::ERC721HooksTrait<ContractState> {
-        fn before_update(
-            ref self: ERC721Component::ComponentState<ContractState>,
-            to: ContractAddress,
-            token_id: u256,
-            auth: ContractAddress,
-        ) {
-            let contract_state = self.get_contract();
-            let current_owner = contract_state.erc721.ERC721_owners.read(token_id);
-            // Mint and burn are always permitted; holder-to-holder movement
-            // requires a transferable, unexpired license.
-            if current_owner.is_zero() || to.is_zero() {
-                return;
-            }
-            let data = contract_state.licenses.read(token_id);
-            assert(data.transferable, 'License not transferable');
-            assert(get_block_timestamp() < data.expires_at, 'License expired');
-        }
-
-        fn after_update(
-            ref self: ERC721Component::ComponentState<ContractState>,
-            to: ContractAddress,
-            token_id: u256,
-            auth: ContractAddress,
-        ) {}
     }
 
     #[abi(embed_v0)]
@@ -218,7 +192,7 @@ pub mod IPSponsorshipLicense {
         }
 
         fn version(self: @ContractState) -> ByteArray {
-            "2.0.0"
+            "3.0.0"
         }
     }
 }

@@ -1,161 +1,130 @@
 # IP Club
 
-`IP-Club` is a permissionless Starknet protocol for NFT-gated IP communities.
-Anyone can create a club, and each club receives its own immutable ERC-721
-membership contract.
+`IP-Club` is a Starknet ERC-721 membership protocol. `IPClubFactory` deploys
+one `IPClubCollection` per creator; anyone can mint a membership card from a
+deployed collection, optionally paying an ERC-20 entry fee straight to the
+collection owner.
 
-The protocol is designed as a public-good primitive:
-
-- Permissionless club creation.
-- One ERC-721 membership collection per club.
-- Optional ERC-20 entry fee paid directly to the club creator.
-- Creator-chosen transferability: a membership card is transferable once a
-  per-club vesting period (set immutably at club creation) has elapsed since
-  its mint — or permanently non-transferable if the creator sets no vesting.
-- EIP-2981 royalty to the club creator on card resales (basis points set
-  immutably at club creation).
-- No per-wallet limits: a wallet may join any number of times, paying the
-  entry fee each time, and may hold any number of cards.
-- Content-addressed club metadata only: `ipfs://` or `ar://`.
-- `safe_mint` membership issuance to prevent locked NFTs.
-- No upgrade path in the manager contract.
+Membership cards are ordinary, indexable, transferable ERC-721 tokens — sales
+happen on any marketplace that trades ERC-721.
 
 ## Design
 
-- **Members can leave.** `leave_club(club_id, token_id)` burns the caller's
-  own membership NFT and frees the seat. Exit is always allowed — open or
-  closed club — and the entry fee is not refunded (it flowed to the creator
-  at join time). Nobody is kept on a public on-chain roster against their
-  will.
-- **Closure is reversible.** `set_club_open(club_id, open)` — creator-only,
-  gating **new joins only**. Existing memberships and the right to leave are
-  never affected.
-- **Checks-effects-interactions.** Club state is final before the fee
-  transfer and the membership mint; a reentrant payment token runs under its
-  own caller context and the transaction reverts atomically (tested with a
-  single-reentry mock).
-- **Lean records.** The club's NFT contract is the source of truth for asset
-  metadata; the registry record holds only what it enforces (existence ⇔
-  `creator != 0`; `open: bool` is the only switch).
-- **Indexer-complete events.** `NewClubCreated` carries the deployed
-  `club_nft` address; `ClubStatusUpdated` and `MemberLeft` cover the full
-  lifecycle.
+The contracts follow the Mediolano principles:
+
+- **Ownerless factory, owned collections.** Anyone deploys their own
+  `IPClubCollection` via the factory; the factory itself has no admin, no
+  upgrade path, and takes no fee. Only the collection's owner (the deployer)
+  can gate new joins (`set_open`) — the same access model as every other
+  per-creator NFT contract in the catalog.
+- **On-chain collection identity.** `deploy_club(name, symbol, base_uri, …)`
+  embeds the collection-level metadata URI in the deploy transaction;
+  `name()`, `symbol()`, and `base_uri()` are readable on-chain. Per-token
+  metadata is standard OZ ERC-721: `token_uri(token_id) = base_uri + token_id`.
+- **Public, fee-gated mint.** Anyone may call `mint`; if the club has an entry
+  fee, it settles payer → owner in the same call. There is no owner-only mint
+  gate — `is_open` controls whether minting is possible at all, not who may
+  call it.
+- **Checks-effects-interactions.** Token id assignment and the supply-cap
+  check are final before the fee transfer and the mint call; a reentrant
+  payment token runs under its own caller context and the transaction reverts
+  atomically (tested with a single-reentry mock).
+- **Royalty discovery.** The ERC-2981 interface ID is registered via SRC5 and
+  `royalty_info` is exposed in snake_case alongside the camelCase
+  `royaltyInfo` alias. The receiver is the collection owner.
+- **Lean records.** `total_minted` derives from the sequential token-id
+  counter; storage holds only what the contract enforces (`max_supply`,
+  `entry_fee`, `payment_token`, `royalty_bps`, `is_open`).
 
 ## Service Asset Declaration
 
-This service follows the shared doctrine in
-[`docs/SERVICE_ASSET_DOCTRINE.md`](../../docs/SERVICE_ASSET_DOCTRINE.md).
+This service follows the shared doctrine in [`docs/SERVICE_ASSET_DOCTRINE.md`](../../docs/SERVICE_ASSET_DOCTRINE.md).
 
 | Field | Value |
 | --- | --- |
 | `service_id` | `ip-club` |
 | `asset_standard` | ERC721 |
-| `asset_role` | Club membership badge/access pass |
-| `transferability` | Creator-chosen: transferable after the club's vesting lock, or never if none is set |
-| `access_semantics` | Current ownership of the `IPClubNFT` |
-| `marketplace_visibility` | Display and index; no default marketplace listing |
-| `metadata_uri_policy` | `ipfs://` or `ar://` |
-| `src5_interface_id` | `IIP_CLUB_ID`, `IIP_CLUB_NFT_ID` |
+| `asset_role` | Club membership card |
+| `transferability` | Transferable |
+| `access_semantics` | Current ownership of the membership token id |
+| `marketplace_visibility` | Display and list as ERC721 membership cards |
+| `metadata_uri_policy` | `ipfs://` or `ar://`, must end with `/` |
+| `src5_interface_id` | `IIP_CLUB_COLLECTION_ID` + `IERC2981_ID` (collection); `IIP_CLUB_FACTORY_ID` (factory) |
 
-The membership NFT exists for visibility, indexing, and access checks.
-`num_members` counts cards outstanding (joins minus leaves); transfers move
-membership without changing the count.
+## Features
 
-## Contracts
-
-| Contract | Role |
-| --- | --- |
-| `IPClub` | Registry and club factory. Deploys per-club membership NFTs, stores club records, processes joins, and exposes membership checks. |
-| `IPClubNFT` | Per-club ERC-721 membership pass. Only its `IPClub` manager can mint or burn. Transfers are gated by the club's vesting lock; burns (leaving) are always allowed. |
-
-## Club Lifecycle
-
-1. Deploy `IPClub` with the declared `IPClubNFT` class hash.
-2. A creator calls `create_club`.
-3. `IPClub` deploys a dedicated `IPClubNFT`.
-4. Members call `join_club`.
-5. If configured, the ERC-20 entry fee is transferred to the creator.
-6. `IPClubNFT.safe_mint` issues the membership NFT.
-7. The creator can call `set_club_open(club_id, false)` to stop new joins
-   (reversible; never affects existing members or the right to leave).
-
-## Metadata
-
-`metadata_uri` must be content-addressed:
-
-```text
-ipfs://bafy...
-ar://...
-```
-
-HTTP URLs are intentionally rejected.
+- One deployed `IPClubCollection` per creator, via the ownerless
+  `IPClubFactory` — the same shape as every other per-creator NFT contract, so
+  memberships are tradeable and indexable like any other asset.
+- Public mint, gated only by `is_open` and an optional per-club `max_supply`.
+- Optional ERC-20 entry fee, paid directly payer → collection owner.
+- `set_open(bool)` — owner-only, reversible pause on new mints; never affects
+  existing members.
+- Content-addressed collection metadata (`ipfs://` or `ar://`, must end with
+  `/`); standard OZ `token_uri`/`tokenURI` per token.
+- ERC-2981-style royalties per card, paid to the collection owner.
+- SRC5 service interface detection.
 
 ## Interface
 
-### `IPClub`
+`IPClubFactory`:
 
 ```cairo
-fn create_club(
+fn collection_class_hash() -> ClassHash;
+fn version() -> ByteArray;
+fn deploy_club(
     name: ByteArray,
     symbol: ByteArray,
-    metadata_uri: ByteArray,
-    max_members: Option<u32>,
-    entry_fee: Option<u256>,
+    base_uri: ByteArray,
+    max_supply: u256,
+    entry_fee: u256,
     payment_token: Option<ContractAddress>,
-    transfer_lock: Option<u64>,   // seconds from mint until a card is transferable; None = never
-    royalty_bps: u256,            // EIP-2981 royalty to the creator on card resales
-) -> u256;
-
-fn set_club_open(club_id: u256, open: bool);
-fn join_club(club_id: u256);
-fn leave_club(club_id: u256, token_id: u256);
-fn get_club_record(club_id: u256) -> ClubRecord;
-fn is_member(club_id: u256, user: ContractAddress) -> bool;
-fn get_last_club_id() -> u256;
-fn version() -> ByteArray;
+    royalty_bps: u256,
+) -> ContractAddress;
 ```
 
-Custom SRC5 interface ID:
+`IPClubCollection` (one per creator, deployed by the factory), on top of
+standard ERC-721 + SRC5 + Ownable:
 
 ```cairo
-// starknet_keccak("mediolano.ip-club.v2")
-IIP_CLUB_ID =
-0x027db28e39a9c175613ead4d5f54645106b22d41799a23649c05efbee3ebab61
-```
+fn mint(to: ContractAddress) -> u256; // public — pulls entry_fee if set
 
-### `IPClubNFT`
+fn set_open(open: bool); // owner only
 
-```cairo
-fn mint(recipient: ContractAddress);                 // manager (registry) only
-fn burn(member: ContractAddress, token_id: u256);    // manager (registry) only — the leave path
-fn has_nft(user: ContractAddress) -> bool;
-fn get_nft_creator() -> ContractAddress;
-fn get_ip_club_manager() -> ContractAddress;
-fn get_associated_club_id() -> u256;
-fn get_last_minted_id() -> u256;
+fn base_uri() -> ByteArray;
+fn entry_fee() -> u256;
+fn payment_token() -> Option<ContractAddress>;
+fn max_supply() -> u256;
+fn total_minted() -> u256;
+fn is_open() -> bool;
+
 fn royalty_info(token_id: u256, sale_price: u256) -> (ContractAddress, u256);
 fn royaltyInfo(token_id: u256, sale_price: u256) -> (ContractAddress, u256);
 fn version() -> ByteArray;
 ```
 
-Custom SRC5 interface IDs (the NFT also registers `IERC2981_ID` and the
-`ILICENSED_COLLECTION_ID` programmable-license discovery marker):
+Custom SRC5 interface IDs:
 
 ```cairo
-// starknet_keccak("mediolano.ip-club-nft.v2")
-IIP_CLUB_NFT_ID =
-0x03ec0e4175cbdefdf73fd14b4d6cfe3ada3a099f0e85bc971bba220a62caffbd
+// starknet_keccak("mediolano.ip-club-collection.v3")
+IIP_CLUB_COLLECTION_ID =
+0x4b7aad07052a830d89731d485a019e4035c06a1699b800a0e74f732e8158ad
+
+// starknet_keccak("mediolano.ip-club-factory.v1")
+IIP_CLUB_FACTORY_ID =
+0x228cd17a62a26bc1bbc9f07724633fa45b6326759b4f6b44e856ade9ff59db1
 ```
 
-## Security Posture
+## Access Semantics
 
-- `join_club` follows checks-effects-interactions: club state is final before
-  the fee transfer and the mint; a revert rolls the whole transaction back.
-- `IPClubNFT` uses `safe_mint`.
-- `IPClubNFT`'s transfer hook enforces the club's vesting lock; mints and
-  burns are never gated.
-- Missing clubs revert explicitly with `Club does not exist`.
-- Events key `club_id`, creator/member, and token identifiers for indexers.
+A wallet holds a valid membership when:
+
+```text
+balance_of(wallet) > 0
+```
+
+Transfers move membership with ownership. Anyone may join any number of times
+(paying the entry fee each time) and hold any number of cards.
 
 ## Development
 
@@ -165,7 +134,7 @@ scarb build
 snforge test
 ```
 
-Current tested dependency baseline:
+Tested baseline:
 
 | Package | Version |
 | --- | --- |
@@ -175,7 +144,20 @@ Current tested dependency baseline:
 
 ## Status
 
-Deployed to Starknet mainnet 2026-07-02. Registry:
-`0x00e189c619b6bb07d78973a149641c59c37eb0716f8584d7520bce12d303eede`,
-`IPClubNFT` class hash:
-`0x02bc9b20cca21b04245e9215bf7121f4d7295b195890e449b472b573017fb889`.
+Deployed to Starknet mainnet 2026-07-15 (on-chain `IPClubCollection.version()`
+== "3.0.0"). `IPClubFactory`:
+`0x05519705345ce225db666253a21cf89d1c675658f16cc6ae4320cefd1a1219a3`,
+`IPClubCollection` class hash:
+`0x35b8836a2269523ae9176077ec525451cce1053b2acd9fae3b05354aa4eded3`.
+
+Note: `IPClubFactory.version()` itself still reports `"1.0.0"` — the factory's
+own logic is unchanged since its original 2026-07-12 deploy (this redeploy
+only fixed `IPClubCollection`'s per-token metadata), so it reused its
+already-declared class hash rather than getting a fresh one.
+
+Superseded: the original registry contract
+(`0x00e189c619b6bb07d78973a149641c59c37eb0716f8584d7520bce12d303eede`,
+2026-07-02) and the first factory
+(`0x010726346c264d1832a7303afaf5692dbd2b05446fecc6da30d958d0227c36d0`,
+2026-07-12) remain valid on-chain for their existing clubs but are not
+tracked here.

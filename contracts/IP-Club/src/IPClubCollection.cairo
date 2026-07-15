@@ -1,5 +1,8 @@
 // IPClubCollection — per-creator ERC-721 membership contract deployed by
 // IPClubFactory. Public mint; fee flows directly creator → buyer in the call.
+// Standard per-token metadata: token_uri = base_uri + token_id, so base_uri
+// is a content-addressed directory (must end with '/') holding one document
+// per card — uniform cards, serials, or tiers are all the creator's choice.
 // Fully immutable: no metadata update, no supply change, no admin backdoors.
 // Ownable only for set_open (creator-managed pause on new memberships).
 
@@ -10,12 +13,11 @@ pub mod IPClubCollection {
     use openzeppelin_introspection::src5::SRC5Component;
     use openzeppelin_token::common::erc2981::interface::IERC2981_ID;
     use openzeppelin_token::erc20::interface::{IERC20Dispatcher, IERC20DispatcherTrait};
-    use openzeppelin_token::erc721::ERC721Component;
-    use openzeppelin_token::erc721::interface::{IERC721Metadata, IERC721MetadataCamelOnly};
+    use openzeppelin_token::erc721::{ERC721Component, ERC721HooksEmptyImpl};
     use starknet::storage::{StoragePointerReadAccess, StoragePointerWriteAccess};
     use starknet::{ContractAddress, get_caller_address};
     use crate::interface::{IIPClubCollection, IIP_CLUB_COLLECTION_ID};
-    use crate::types::bytearray_starts_with;
+    use crate::types::{bytearray_ends_with, bytearray_starts_with};
 
     component!(path: ERC721Component, storage: erc721, event: ERC721Event);
     component!(path: SRC5Component, storage: src5, event: SRC5Event);
@@ -25,6 +27,11 @@ pub mod IPClubCollection {
     impl ERC721Impl = ERC721Component::ERC721Impl<ContractState>;
     #[abi(embed_v0)]
     impl ERC721CamelOnly = ERC721Component::ERC721CamelOnlyImpl<ContractState>;
+    #[abi(embed_v0)]
+    impl ERC721MetadataImpl = ERC721Component::ERC721MetadataImpl<ContractState>;
+    #[abi(embed_v0)]
+    impl ERC721MetadataCamelOnlyImpl =
+        ERC721Component::ERC721MetadataCamelOnlyImpl<ContractState>;
     #[abi(embed_v0)]
     impl SRC5Impl = SRC5Component::SRC5Impl<ContractState>;
     #[abi(embed_v0)]
@@ -42,8 +49,6 @@ pub mod IPClubCollection {
         src5: SRC5Component::Storage,
         #[substorage(v0)]
         ownable: OwnableComponent::Storage,
-        /// Immutable collection metadata URI (ipfs:// or ar://).
-        club_base_uri: ByteArray,
         /// Hard cap on membership supply. Immutable.
         club_max_supply: u256,
         /// Entry fee per membership in payment_token base units. Immutable.
@@ -55,7 +60,6 @@ pub mod IPClubCollection {
         /// Creator-controlled gate on new mints. Does not affect existing members.
         club_is_open: bool,
         next_token_id: u256,
-        club_total_minted: u256,
     }
 
     #[event]
@@ -102,6 +106,9 @@ pub mod IPClubCollection {
         let valid_uri = bytearray_starts_with(@base_uri, @"ipfs://")
             || bytearray_starts_with(@base_uri, @"ar://");
         assert(valid_uri, 'URI must be ipfs:// or ar://');
+        // token_uri = base_uri + token_id, so the directory separator must
+        // already be present or every card's URI dangles permanently.
+        assert(bytearray_ends_with(@base_uri, @"/"), 'Base URI must end with /');
         assert(max_supply > 0, 'Max supply must be > 0');
         assert(royalty_bps <= 10000, 'Royalty exceeds 10000');
         assert(!owner.is_zero(), 'Owner is zero address');
@@ -112,12 +119,11 @@ pub mod IPClubCollection {
             assert(!payment_token.unwrap().is_zero(), 'Payment token is zero');
         }
 
-        self.erc721.initializer(name, symbol, "");
+        self.erc721.initializer(name, symbol, base_uri);
         self.ownable.initializer(owner);
         self.src5.register_interface(IIP_CLUB_COLLECTION_ID);
         self.src5.register_interface(IERC2981_ID);
 
-        self.club_base_uri.write(base_uri);
         self.club_max_supply.write(max_supply);
         self.club_entry_fee.write(entry_fee);
         self.club_payment_token.write(payment_token);
@@ -126,59 +132,18 @@ pub mod IPClubCollection {
         self.next_token_id.write(1);
     }
 
-    impl ERC721HooksImpl of ERC721Component::ERC721HooksTrait<ContractState> {
-        fn before_update(
-            ref self: ERC721Component::ComponentState<ContractState>,
-            to: ContractAddress,
-            token_id: u256,
-            auth: ContractAddress,
-        ) {}
-
-        fn after_update(
-            ref self: ERC721Component::ComponentState<ContractState>,
-            to: ContractAddress,
-            token_id: u256,
-            auth: ContractAddress,
-        ) {}
-    }
-
-    #[abi(embed_v0)]
-    impl ERC721MetadataImpl of IERC721Metadata<ContractState> {
-        fn name(self: @ContractState) -> ByteArray {
-            self.erc721.ERC721_name.read()
-        }
-
-        fn symbol(self: @ContractState) -> ByteArray {
-            self.erc721.ERC721_symbol.read()
-        }
-
-        fn token_uri(self: @ContractState, token_id: u256) -> ByteArray {
-            self.erc721._require_owned(token_id);
-            self.club_base_uri.read()
-        }
-    }
-
-    #[abi(embed_v0)]
-    impl ERC721MetadataCamelOnlyImpl of IERC721MetadataCamelOnly<ContractState> {
-        fn tokenURI(self: @ContractState, tokenId: u256) -> ByteArray {
-            self.erc721._require_owned(tokenId);
-            self.club_base_uri.read()
-        }
-    }
-
     #[abi(embed_v0)]
     pub impl IPClubCollectionImpl of IIPClubCollection<ContractState> {
         fn mint(ref self: ContractState, to: ContractAddress) -> u256 {
             assert(self.club_is_open.read(), 'Club is closed');
-            assert(self.club_total_minted.read() < self.club_max_supply.read(), 'Max supply reached');
             assert(!to.is_zero(), 'Recipient is zero address');
 
             let payer = get_caller_address();
 
             // Effects before external calls (checks-effects-interactions).
             let token_id = self.next_token_id.read();
+            assert(token_id <= self.club_max_supply.read(), 'Max supply reached');
             self.next_token_id.write(token_id + 1);
-            self.club_total_minted.write(self.club_total_minted.read() + 1);
 
             let fee = self.club_entry_fee.read();
             if fee > 0 {
@@ -203,7 +168,7 @@ pub mod IPClubCollection {
         }
 
         fn base_uri(self: @ContractState) -> ByteArray {
-            self.club_base_uri.read()
+            self.erc721.ERC721_base_uri.read()
         }
 
         fn entry_fee(self: @ContractState) -> u256 {
@@ -219,7 +184,7 @@ pub mod IPClubCollection {
         }
 
         fn total_minted(self: @ContractState) -> u256 {
-            self.club_total_minted.read()
+            self.next_token_id.read() - 1
         }
 
         fn is_open(self: @ContractState) -> bool {
@@ -238,14 +203,11 @@ pub mod IPClubCollection {
         fn royaltyInfo(
             self: @ContractState, token_id: u256, sale_price: u256,
         ) -> (ContractAddress, u256) {
-            self.erc721._require_owned(token_id);
-            let owner = self.ownable.owner();
-            let amount = (sale_price * self.club_royalty_bps.read()) / 10000;
-            (owner, amount)
+            self.royalty_info(token_id, sale_price)
         }
 
         fn version(self: @ContractState) -> ByteArray {
-            "1.0.0"
+            "2.0.0"
         }
     }
 }

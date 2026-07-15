@@ -1,8 +1,8 @@
 use starknet::{ClassHash, ContractAddress};
 
-// starknet_keccak("mediolano.ip-club-collection.v2")
+// starknet_keccak("mediolano.ip-club-collection.v3")
 pub const IIP_CLUB_COLLECTION_ID: felt252 =
-    0x112f516c4cd5a5095db9a2e20c7fc3ac94631976965acd345652f01a29c1d40;
+    0x4b7aad07052a830d89731d485a019e4035c06a1699b800a0e74f732e8158ad;
 
 // starknet_keccak("mediolano.ip-club-factory.v1")
 pub const IIP_CLUB_FACTORY_ID: felt252 =

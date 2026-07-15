@@ -1,10 +1,8 @@
-// IPClubCollection — per-creator ERC-721 membership contract deployed by
-// IPClubFactory. Public mint; fee flows directly creator → buyer in the call.
-// Standard per-token metadata: token_uri = base_uri + token_id, so base_uri
-// is a content-addressed directory (must end with '/') holding one document
-// per card — uniform cards, serials, or tiers are all the creator's choice.
-// Fully immutable: no metadata update, no supply change, no admin backdoors.
-// Ownable only for set_open (creator-managed pause on new memberships).
+// IPClubCollection — per-creator ERC-721 membership collection deployed by
+// IPClubFactory. Anyone may mint; the entry fee settles payer → owner
+// directly. token_uri = base_uri + token_id over a content-addressed
+// directory. No metadata update, no supply change, no admin surface beyond
+// set_open.
 
 #[starknet::contract]
 pub mod IPClubCollection {
@@ -49,15 +47,10 @@ pub mod IPClubCollection {
         src5: SRC5Component::Storage,
         #[substorage(v0)]
         ownable: OwnableComponent::Storage,
-        /// Hard cap on membership supply. Immutable.
         club_max_supply: u256,
-        /// Entry fee per membership in payment_token base units. Immutable.
         club_entry_fee: u256,
-        /// ERC-20 accepted for entry fees. None means free. Immutable.
         club_payment_token: Option<ContractAddress>,
-        /// EIP-2981 royalty in basis points (0..=10000). Immutable.
         club_royalty_bps: u256,
-        /// Creator-controlled gate on new mints. Does not affect existing members.
         club_is_open: bool,
         next_token_id: u256,
     }
@@ -106,8 +99,6 @@ pub mod IPClubCollection {
         let valid_uri = bytearray_starts_with(@base_uri, @"ipfs://")
             || bytearray_starts_with(@base_uri, @"ar://");
         assert(valid_uri, 'URI must be ipfs:// or ar://');
-        // token_uri = base_uri + token_id, so the directory separator must
-        // already be present or every card's URI dangles permanently.
         assert(bytearray_ends_with(@base_uri, @"/"), 'Base URI must end with /');
         assert(max_supply > 0, 'Max supply must be > 0');
         assert(royalty_bps <= 10000, 'Royalty exceeds 10000');
@@ -140,7 +131,6 @@ pub mod IPClubCollection {
 
             let payer = get_caller_address();
 
-            // Effects before external calls (checks-effects-interactions).
             let token_id = self.next_token_id.read();
             assert(token_id <= self.club_max_supply.read(), 'Max supply reached');
             self.next_token_id.write(token_id + 1);
@@ -207,7 +197,7 @@ pub mod IPClubCollection {
         }
 
         fn version(self: @ContractState) -> ByteArray {
-            "2.0.0"
+            "3.0.0"
         }
     }
 }

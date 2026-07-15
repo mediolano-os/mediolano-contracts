@@ -135,7 +135,7 @@ fn test_collection_rejects_http_uri() {
 fn test_collection_version() {
     let TestContracts = setup();
     let club = deploy_free_club(TestContracts.factory, CREATOR());
-    assert!(club.version() == "2.0.0", "collection version");
+    assert!(club.version() == "3.0.0", "collection version");
 }
 
 #[test]

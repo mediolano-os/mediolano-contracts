@@ -1,6 +1,5 @@
 // IPClubFactory — ownerless, immutable deploy point for IPClubCollection
 // contracts. Anyone can deploy a new club; the caller becomes its owner.
-// Mirrors IPTicketCollectionFactory.
 
 #[starknet::contract]
 pub mod IPClubFactory {
@@ -22,9 +21,7 @@ pub mod IPClubFactory {
     struct Storage {
         #[substorage(v0)]
         src5: SRC5Component::Storage,
-        /// Class hash of IPClubCollection. Fixed at deploy time.
         ip_club_collection_class_hash: ClassHash,
-        /// Monotonically incrementing nonce for unique deploy salts.
         deploy_nonce: felt252,
     }
 
@@ -36,7 +33,6 @@ pub mod IPClubFactory {
         ClubDeployed: ClubDeployed,
     }
 
-    /// Emitted each time a new IPClubCollection is deployed via `deploy_club`.
     #[derive(Drop, starknet::Event)]
     pub struct ClubDeployed {
         #[key]

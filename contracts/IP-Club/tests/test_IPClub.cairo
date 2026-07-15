@@ -15,7 +15,8 @@ use crate::utils::{
     deploy_reentrant_payment_token, mint_erc20, setup,
 };
 
-// ── Factory ─────────────────────────────────────────────────────────────────
+// ── Factory
+// ─────────────────────────────────────────────────────────────────
 
 #[test]
 fn test_factory_version() {
@@ -64,17 +65,22 @@ fn test_two_clubs_get_different_addresses() {
 #[should_panic(expected: 'Name must not be empty')]
 fn test_factory_rejects_empty_name() {
     let TestContracts = setup();
-    TestContracts.factory.deploy_club("", "VPS", IPFS_URI(), 100_u256, 0_u256, Option::None, 0_u256);
+    TestContracts
+        .factory
+        .deploy_club("", "VPS", IPFS_URI(), 100_u256, 0_u256, Option::None, 0_u256);
 }
 
 #[test]
 #[should_panic(expected: 'Symbol must not be empty')]
 fn test_factory_rejects_empty_symbol() {
     let TestContracts = setup();
-    TestContracts.factory.deploy_club("Vipers", "", IPFS_URI(), 100_u256, 0_u256, Option::None, 0_u256);
+    TestContracts
+        .factory
+        .deploy_club("Vipers", "", IPFS_URI(), 100_u256, 0_u256, Option::None, 0_u256);
 }
 
-// ── Collection basics ────────────────────────────────────────────────────────
+// ── Collection basics
+// ────────────────────────────────────────────────────────
 
 #[test]
 fn test_collection_name_symbol() {
@@ -115,7 +121,13 @@ fn test_collection_rejects_http_uri() {
     TestContracts
         .factory
         .deploy_club(
-            "Vipers", "VPS", "https://example.com/club.json", 100_u256, 0_u256, Option::None, 0_u256,
+            "Vipers",
+            "VPS",
+            "https://example.com/club.json",
+            100_u256,
+            0_u256,
+            Option::None,
+            0_u256,
         );
 }
 
@@ -123,7 +135,7 @@ fn test_collection_rejects_http_uri() {
 fn test_collection_version() {
     let TestContracts = setup();
     let club = deploy_free_club(TestContracts.factory, CREATOR());
-    assert!(club.version() == "1.0.0", "collection version");
+    assert!(club.version() == "3.0.0", "collection version");
 }
 
 #[test]
@@ -146,7 +158,8 @@ fn test_collection_initial_state() {
     assert!(club.payment_token().is_none(), "no payment token");
 }
 
-// ── Mint (free) ──────────────────────────────────────────────────────────────
+// ── Mint (free)
+// ──────────────────────────────────────────────────────────────
 
 #[test]
 fn test_mint_free_membership() {
@@ -214,7 +227,8 @@ fn test_mint_to_non_receiver_contract_reverts() {
     club.mint(TestContracts.factory.contract_address);
 }
 
-// ── Supply cap ───────────────────────────────────────────────────────────────
+// ── Supply cap
+// ───────────────────────────────────────────────────────────────
 
 #[test]
 #[should_panic(expected: 'Max supply reached')]
@@ -249,7 +263,8 @@ fn test_deploy_club_rejects_zero_supply() {
         .deploy_club("Vipers", "VPS", IPFS_URI(), 0_u256, 0_u256, Option::None, 0_u256);
 }
 
-// ── set_open ─────────────────────────────────────────────────────────────────
+// ── set_open
+// ─────────────────────────────────────────────────────────────────
 
 #[test]
 fn test_set_open_closes_and_reopens() {
@@ -289,7 +304,8 @@ fn test_only_owner_can_set_open() {
     club.set_open(false);
 }
 
-// ── Paid membership ──────────────────────────────────────────────────────────
+// ── Paid membership
+// ──────────────────────────────────────────────────────────
 
 #[test]
 fn test_mint_with_entry_fee() {
@@ -367,17 +383,12 @@ fn test_paid_club_rejects_zero_payment_token() {
     TestContracts
         .factory
         .deploy_club(
-            "Vipers",
-            "VPS",
-            IPFS_URI(),
-            100_u256,
-            1000_u256,
-            Option::Some(ZERO_ADDRESS()),
-            0_u256,
+            "Vipers", "VPS", IPFS_URI(), 100_u256, 1000_u256, Option::Some(ZERO_ADDRESS()), 0_u256,
         );
 }
 
-// ── Royalties ────────────────────────────────────────────────────────────────
+// ── Royalties
+// ────────────────────────────────────────────────────────────────
 
 #[test]
 fn test_royalty_info() {
@@ -411,22 +422,63 @@ fn test_royalty_bps_capped() {
         .deploy_club("Vipers", "VPS", IPFS_URI(), 100_u256, 0_u256, Option::None, 10001_u256);
 }
 
-// ── token_uri ────────────────────────────────────────────────────────────────
+// ── token_uri
+// ────────────────────────────────────────────────────────────────
 
 #[test]
-fn test_token_uri_returns_base_uri() {
+fn test_token_uri_is_per_token() {
     let TestContracts = setup();
     let club = deploy_free_club(TestContracts.factory, CREATOR());
     let member = deploy_receiver();
 
     cheat_caller_address(club.contract_address, member, CheatSpan::TargetCalls(1));
-    let token_id = club.mint(member);
+    let t1 = club.mint(member);
+    cheat_caller_address(club.contract_address, member, CheatSpan::TargetCalls(1));
+    let t2 = club.mint(member);
 
     let meta = IERC721MetadataDispatcher { contract_address: club.contract_address };
-    assert!(meta.token_uri(token_id) == IPFS_URI(), "token_uri == base_uri");
+    assert!(meta.token_uri(t1) == "ipfs://bafybeiclubmetadata/1", "token 1 uri");
+    assert!(meta.token_uri(t2) == "ipfs://bafybeiclubmetadata/2", "token 2 uri");
 }
 
-// ── Reentrancy ───────────────────────────────────────────────────────────────
+#[test]
+#[should_panic(expected: 'Base URI must end with /')]
+fn test_deploy_rejects_uri_without_trailing_slash() {
+    let TestContracts = setup();
+    cheat_caller_address(
+        TestContracts.factory.contract_address, CREATOR(), CheatSpan::TargetCalls(1),
+    );
+    TestContracts
+        .factory
+        .deploy_club(
+            "Vipers", "VPS", "ipfs://bafybeiclubmetadata", 100_u256, 0_u256, Option::None, 0_u256,
+        );
+}
+
+// ── Transferability
+// ──────────────────────────────────────────────────────────
+
+#[test]
+fn test_membership_card_transfers_like_standard_erc721() {
+    let TestContracts = setup();
+    let club = deploy_free_club(TestContracts.factory, CREATOR());
+    let member = deploy_receiver();
+    let buyer = deploy_receiver();
+
+    cheat_caller_address(club.contract_address, member, CheatSpan::TargetCalls(1));
+    let token_id = club.mint(member);
+
+    let erc721 = IERC721Dispatcher { contract_address: club.contract_address };
+    cheat_caller_address(club.contract_address, member, CheatSpan::TargetCalls(1));
+    erc721.transfer_from(member, buyer, token_id);
+
+    assert!(erc721.owner_of(token_id) == buyer, "buyer holds the card");
+    assert!(erc721.balance_of(member) == 0, "seller no longer a member");
+    assert!(erc721.balance_of(buyer) == 1, "membership moved with the card");
+}
+
+// ── Reentrancy
+// ───────────────────────────────────────────────────────────────
 
 // A reentrant payment token attempting to call mint() from within transfer_from
 // runs under the reentrant token's caller context. It will fail because
@@ -447,9 +499,7 @@ fn test_reentrant_payment_token_reverts_atomically() {
     let placeholder: starknet::ContractAddress = 0x999.try_into().unwrap();
     let addr = TestContracts
         .factory
-        .deploy_club(
-            "Vipers", "VPS", IPFS_URI(), 100_u256, fee, Option::Some(placeholder), 0_u256,
-        );
+        .deploy_club("Vipers", "VPS", IPFS_URI(), 100_u256, fee, Option::Some(placeholder), 0_u256);
     let reentrant_token = deploy_reentrant_payment_token(addr, reentry_target);
 
     // Re-deploy with the reentrant token (need a second club).

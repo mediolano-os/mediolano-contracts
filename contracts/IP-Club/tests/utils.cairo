@@ -20,11 +20,11 @@ pub fn ZERO_ADDRESS() -> ContractAddress {
 }
 
 pub fn IPFS_URI() -> ByteArray {
-    "ipfs://bafybeiclubmetadata"
+    "ipfs://bafybeiclubmetadata/"
 }
 
 pub fn AR_URI() -> ByteArray {
-    "ar://club-metadata"
+    "ar://club-metadata/"
 }
 
 pub fn declare_and_deploy(contract_name: ByteArray, calldata: Array<felt252>) -> ContractAddress {

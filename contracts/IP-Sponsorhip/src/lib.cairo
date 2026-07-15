@@ -1,5 +1,4 @@
 pub mod IPSponsorship;
-pub mod IPSponsorshipLicense;
 pub mod interface;
 pub mod types;
 pub mod mocks {

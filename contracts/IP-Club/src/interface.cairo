@@ -1,44 +1,68 @@
 use starknet::{ClassHash, ContractAddress};
+use crate::types::Membership;
 
-// starknet_keccak("mediolano.ip-club-collection.v3")
+// Protocol discovery ID registered via SRC5.
+// starknet_keccak("mediolano.ip-club-collection")
 pub const IIP_CLUB_COLLECTION_ID: felt252 =
-    0x4b7aad07052a830d89731d485a019e4035c06a1699b800a0e74f732e8158ad;
+    0x2cee01ae4b57170456f53b518718e8c53e8b9a91aa41c555d0e8c31f217b00e;
 
-// starknet_keccak("mediolano.ip-club-factory.v1")
-pub const IIP_CLUB_FACTORY_ID: felt252 =
-    0x228cd17a62a26bc1bbc9f07724633fa45b6326759b4f6b44e856ade9ff59db1;
+// starknet_keccak("mediolano.ip-club-collection-factory")
+pub const IIP_CLUB_COLLECTION_FACTORY_ID: felt252 =
+    0x14cfd8023b9e536938a3b7bf877bfa5a7f1a993b3e8362b95e671db9f17f634;
 
 #[starknet::interface]
 pub trait IIPClubCollection<TContractState> {
-    fn mint(ref self: TContractState, to: ContractAddress) -> u256;
-    fn set_open(ref self: TContractState, open: bool);
+    /// Owner-only. Registers a new membership tier, assigns the next
+    /// sequential token ID.
+    fn create_membership(
+        ref self: TContractState,
+        max_supply: u256,
+        start_time: Option<u64>,
+        end_time: Option<u64>,
+        royalty_bps: u16,
+        metadata_uri: ByteArray,
+    ) -> u256;
+
+    /// Owner-only. Mints `amount` of `token_id` to `to`. Enforces max_supply.
+    /// The validity window does not gate minting — a tier may be minted and
+    /// sold before its window opens.
+    fn mint(ref self: TContractState, to: ContractAddress, token_id: u256, amount: u256);
+
+    /// True iff `holder` holds any tier whose validity window contains the
+    /// current time (a tier with no window is always valid).
+    fn is_member(self: @TContractState, holder: ContractAddress) -> bool;
+
+    /// True iff `holder` holds `token_id` and the current time is inside its
+    /// validity window.
+    fn is_member_of(self: @TContractState, token_id: u256, holder: ContractAddress) -> bool;
+
+    /// Returns the Membership for `token_id`. Panics if never created.
+    fn get_membership(self: @TContractState, token_id: u256) -> Membership;
+
+    /// Collection identity, set once at deploy.
+    fn name(self: @TContractState) -> ByteArray;
+    fn symbol(self: @TContractState) -> ByteArray;
     fn base_uri(self: @TContractState) -> ByteArray;
-    fn entry_fee(self: @TContractState) -> u256;
-    fn payment_token(self: @TContractState) -> Option<ContractAddress>;
-    fn max_supply(self: @TContractState) -> u256;
-    fn total_minted(self: @TContractState) -> u256;
-    fn is_open(self: @TContractState) -> bool;
+
+    /// EIP-2981. Receiver = the collection owner; amount = sale_price * bps / 10000.
     fn royalty_info(
         self: @TContractState, token_id: u256, sale_price: u256,
     ) -> (ContractAddress, u256);
     fn royaltyInfo(
         self: @TContractState, token_id: u256, sale_price: u256,
     ) -> (ContractAddress, u256);
+
     fn version(self: @TContractState) -> ByteArray;
 }
 
 #[starknet::interface]
-pub trait IIPClubFactory<TContractState> {
+pub trait IIPClubCollectionFactory<TContractState> {
     fn collection_class_hash(self: @TContractState) -> ClassHash;
     fn version(self: @TContractState) -> ByteArray;
-    fn deploy_club(
-        ref self: TContractState,
-        name: ByteArray,
-        symbol: ByteArray,
-        base_uri: ByteArray,
-        max_supply: u256,
-        entry_fee: u256,
-        payment_token: Option<ContractAddress>,
-        royalty_bps: u256,
+    /// Deploys a new club collection. The caller becomes its owner. `base_uri`
+    /// is the collection-level metadata URI, embedded on-chain in the deploy
+    /// transaction.
+    fn deploy_collection(
+        ref self: TContractState, name: ByteArray, symbol: ByteArray, base_uri: ByteArray,
     ) -> ContractAddress;
 }

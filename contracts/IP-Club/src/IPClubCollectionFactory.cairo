@@ -1,15 +1,19 @@
-// IPClubFactory — ownerless, immutable deploy point for IPClubCollection
-// contracts. Anyone can deploy a new club; the caller becomes its owner.
+// DESIGN: IPClubCollectionFactory is the single deploy point for all
+// IPClubCollection contracts. Anyone can deploy a new club collection — the
+// caller becomes its owner and the only address that can create and mint
+// memberships inside it. The factory is fully immutable and ownerless: the
+// collection class hash is fixed at deploy time. Mirrors
+// IPTicketCollectionFactory (IP-Tickets).
 
 #[starknet::contract]
-pub mod IPClubFactory {
+pub mod IPClubCollectionFactory {
     use core::hash::{HashStateExTrait, HashStateTrait};
     use core::poseidon::PoseidonTrait;
     use openzeppelin_introspection::src5::SRC5Component;
     use starknet::storage::{StoragePointerReadAccess, StoragePointerWriteAccess};
     use starknet::syscalls::deploy_syscall;
     use starknet::{ClassHash, ContractAddress, SyscallResultTrait, get_caller_address};
-    use crate::interface::{IIPClubFactory, IIP_CLUB_FACTORY_ID};
+    use crate::interface::{IIPClubCollectionFactory, IIP_CLUB_COLLECTION_FACTORY_ID};
 
     component!(path: SRC5Component, storage: src5, event: SRC5Event);
 
@@ -21,7 +25,10 @@ pub mod IPClubFactory {
     struct Storage {
         #[substorage(v0)]
         src5: SRC5Component::Storage,
+        /// Class hash used to deploy new IPClubCollection instances.
+        /// Immutable — fixed at deploy.
         ip_club_collection_class_hash: ClassHash,
+        /// Monotonically incrementing nonce for unique deploy salts.
         deploy_nonce: felt252,
     }
 
@@ -33,6 +40,8 @@ pub mod IPClubFactory {
         ClubDeployed: ClubDeployed,
     }
 
+    /// Emitted each time a new IPClubCollection is deployed via
+    /// `deploy_collection`.
     #[derive(Drop, starknet::Event)]
     pub struct ClubDeployed {
         #[key]
@@ -43,52 +52,48 @@ pub mod IPClubFactory {
         pub symbol: ByteArray,
     }
 
+    /// Deploys a new IPClubCollectionFactory.
+    ///
+    /// # Arguments
+    /// * `collection_class_hash` - Class hash of the IPClubCollection
+    ///   contract to deploy. Fixed forever; the factory is ownerless and
+    ///   immutable.
     #[constructor]
     fn constructor(ref self: ContractState, collection_class_hash: ClassHash) {
         assert(collection_class_hash.into() != 0_felt252, 'Class hash is zero');
-        self.src5.register_interface(IIP_CLUB_FACTORY_ID);
+        self.src5.register_interface(IIP_CLUB_COLLECTION_FACTORY_ID);
         self.ip_club_collection_class_hash.write(collection_class_hash);
+        // deploy_nonce defaults to 0 — no explicit write needed
     }
 
     #[abi(embed_v0)]
-    impl IPClubFactoryImpl of IIPClubFactory<ContractState> {
+    impl IPClubCollectionFactoryImpl of IIPClubCollectionFactory<ContractState> {
         fn collection_class_hash(self: @ContractState) -> ClassHash {
             self.ip_club_collection_class_hash.read()
         }
 
         fn version(self: @ContractState) -> ByteArray {
-            "1.0.0"
+            "4.0.0"
         }
 
-        fn deploy_club(
-            ref self: ContractState,
-            name: ByteArray,
-            symbol: ByteArray,
-            base_uri: ByteArray,
-            max_supply: u256,
-            entry_fee: u256,
-            payment_token: Option<ContractAddress>,
-            royalty_bps: u256,
+        fn deploy_collection(
+            ref self: ContractState, name: ByteArray, symbol: ByteArray, base_uri: ByteArray,
         ) -> ContractAddress {
             assert(name.len() > 0, 'Name must not be empty');
             assert(symbol.len() > 0, 'Symbol must not be empty');
 
             let caller = get_caller_address();
 
+            // Derive a unique salt from caller + nonce using Poseidon.
             let nonce = self.deploy_nonce.read();
             let salt = PoseidonTrait::new().update_with(caller).update_with(nonce).finalize();
             self.deploy_nonce.write(nonce + 1);
 
-            // Constructor: (name, symbol, base_uri, max_supply, entry_fee,
-            //               payment_token, royalty_bps, owner)
+            // Serialize constructor calldata: (name, symbol, base_uri, owner).
             let mut calldata: Array<felt252> = array![];
             name.serialize(ref calldata);
             symbol.serialize(ref calldata);
             base_uri.serialize(ref calldata);
-            max_supply.serialize(ref calldata);
-            entry_fee.serialize(ref calldata);
-            payment_token.serialize(ref calldata);
-            royalty_bps.serialize(ref calldata);
             caller.serialize(ref calldata);
 
             let (collection_address, _) = deploy_syscall(

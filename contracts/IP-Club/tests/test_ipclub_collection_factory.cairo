@@ -102,7 +102,7 @@ fn test_different_callers_get_different_addresses() {
 fn test_factory_version() {
     let factory_addr = deploy_factory();
     let factory = IIPClubCollectionFactoryDispatcher { contract_address: factory_addr };
-    assert(factory.version() == "2.0.0", 'factory version 2.0.0');
+    assert(factory.version() == "4.0.0", 'factory version 4.0.0');
 }
 
 #[test]

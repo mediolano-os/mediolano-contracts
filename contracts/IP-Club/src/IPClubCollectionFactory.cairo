@@ -73,7 +73,7 @@ pub mod IPClubCollectionFactory {
         }
 
         fn version(self: @ContractState) -> ByteArray {
-            "2.0.0"
+            "4.0.0"
         }
 
         fn deploy_collection(

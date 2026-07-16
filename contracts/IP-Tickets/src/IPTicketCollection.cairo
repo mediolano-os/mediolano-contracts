@@ -160,14 +160,6 @@ pub mod IPTicketCollection {
 
             let mut ticket = self.tickets.read(token_id);
             assert(ticket.max_supply > 0, 'Ticket not found');
-
-            let now = get_block_timestamp();
-            if let Option::Some(start) = ticket.start_time {
-                assert(now >= start, 'Minting not yet open');
-            }
-            if let Option::Some(end) = ticket.end_time {
-                assert(now < end, 'Minting window closed');
-            }
             assert(ticket.minted + amount <= ticket.max_supply, 'Max supply reached');
 
             ticket.minted += amount;
@@ -204,6 +196,10 @@ pub mod IPTicketCollection {
             ticket
         }
 
+        fn ticket_count(self: @ContractState) -> u256 {
+            self.next_token_id.read() - 1
+        }
+
         fn name(self: @ContractState) -> ByteArray {
             self.name.read()
         }
@@ -232,7 +228,7 @@ pub mod IPTicketCollection {
         }
 
         fn version(self: @ContractState) -> ByteArray {
-            "4.0.0"
+            "5.0.0"
         }
     }
 }

@@ -8,6 +8,7 @@ edition = "2024_07"
 [dependencies]
 starknet = "2.12.0"
 openzeppelin_access = "0.20.0"
+openzeppelin_account = "0.20.0"
 openzeppelin_introspection = "0.20.0"
 openzeppelin_token = "0.20.0"
 

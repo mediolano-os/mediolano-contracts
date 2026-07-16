@@ -182,31 +182,40 @@ fn test_mint_unknown_ticket_panics() {
 }
 
 #[test]
-#[should_panic(expected: 'Minting not yet open')]
-fn test_mint_before_start_time_panics() {
+fn test_mint_outside_window_succeeds() {
+    // Window gates validity, not minting: pre-selling a future-dated ticket.
     let owner = deploy_mock_account();
     let recipient = deploy_mock_account();
     let addr = deploy_collection_with_owner(owner);
     let ticket = IIPTicketCollectionDispatcher { contract_address: addr };
+    let erc1155 = IERC1155Dispatcher { contract_address: addr };
     start_cheat_block_timestamp(addr, 1000);
     start_cheat_caller_address(addr, owner);
     let id = ticket
-        .create_ticket(10_u256, Option::Some(2000_u64), Option::None, 0_u16, "ipfs://QmT");
-    ticket.mint(recipient, id, 1_u256);
+        .create_ticket(
+            10_u256, Option::Some(5000_u64), Option::Some(9000_u64), 0_u16, "ipfs://QmT",
+        );
+    ticket.mint(recipient, id, 2_u256);
+    stop_cheat_caller_address(addr);
+    assert(erc1155.balance_of(recipient, id) == 2_u256, 'minted before window');
+    assert(!ticket.is_valid(id, recipient), 'not yet valid');
+    start_cheat_block_timestamp(addr, 6000);
+    assert(ticket.is_valid(id, recipient), 'valid in window');
+    start_cheat_block_timestamp(addr, 9000);
+    assert(!ticket.is_valid(id, recipient), 'invalid after end');
 }
 
 #[test]
-#[should_panic(expected: 'Minting window closed')]
-fn test_mint_after_end_time_panics() {
+fn test_ticket_count() {
     let owner = deploy_mock_account();
-    let recipient = deploy_mock_account();
     let addr = deploy_collection_with_owner(owner);
     let ticket = IIPTicketCollectionDispatcher { contract_address: addr };
-    start_cheat_block_timestamp(addr, 3000);
+    assert(ticket.ticket_count() == 0_u256, 'starts at 0');
     start_cheat_caller_address(addr, owner);
-    let id = ticket
-        .create_ticket(10_u256, Option::None, Option::Some(2000_u64), 0_u16, "ipfs://QmE");
-    ticket.mint(recipient, id, 1_u256);
+    ticket.create_ticket(10_u256, Option::None, Option::None, 0_u16, "ipfs://QmA");
+    ticket.create_ticket(20_u256, Option::None, Option::None, 0_u16, "ipfs://QmB");
+    stop_cheat_caller_address(addr);
+    assert(ticket.ticket_count() == 2_u256, 'two tickets');
 }
 
 #[test]
@@ -370,7 +379,7 @@ fn test_collection_identity_views() {
 fn test_version() {
     let addr = deploy_collection();
     let ticket = IIPTicketCollectionDispatcher { contract_address: addr };
-    assert(ticket.version() == "4.0.0", 'version should be 4.0.0');
+    assert(ticket.version() == "5.0.0", 'version should be 5.0.0');
 }
 
 #[test]

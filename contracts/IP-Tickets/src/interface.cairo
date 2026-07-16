@@ -22,8 +22,9 @@ pub trait IIPTicketCollection<TContractState> {
         metadata_uri: ByteArray,
     ) -> u256;
 
-    /// Owner-only. Mints `amount` of `token_id` to `to`. Enforces max_supply
-    /// and the ticket's time window.
+    /// Owner-only. Mints `amount` of `token_id` to `to`. Enforces max_supply.
+    /// The validity window does not gate minting — a ticket may be minted and
+    /// sold before its window opens.
     fn mint(ref self: TContractState, to: ContractAddress, token_id: u256, amount: u256);
 
     /// True iff `holder` has balance > 0 and the current time is inside the
@@ -32,6 +33,9 @@ pub trait IIPTicketCollection<TContractState> {
 
     /// Returns the Ticket for `token_id`. Panics if never created.
     fn get_ticket(self: @TContractState, token_id: u256) -> Ticket;
+
+    /// Number of tickets created so far (ids are sequential from 1).
+    fn ticket_count(self: @TContractState) -> u256;
 
     /// Collection identity, set once at deploy.
     fn name(self: @TContractState) -> ByteArray;

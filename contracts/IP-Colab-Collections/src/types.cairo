@@ -1,62 +1,40 @@
-use starknet::{ClassHash, ContractAddress};
+use starknet::ContractAddress;
 
-pub const MAX_NAME_LEN: u32 = 64;
-pub const MAX_SYMBOL_LEN: u32 = 16;
-pub const MAX_BASE_URI_LEN: u32 = 2048;
-pub const MAX_TOKEN_URI_LEN: u32 = 2048;
-pub const URI_POLICY_CONTENT_ADDRESSED: felt252 = 'CONTENT_ADDRESSED';
-
-pub const STATUS_PENDING: u8 = 0;
-pub const STATUS_APPROVED: u8 = 1;
-pub const STATUS_REJECTED: u8 = 2;
-pub const STATUS_MINTED: u8 = 3;
-pub const STATUS_ARCHIVED: u8 = 4;
-
-#[derive(Drop, Serde)]
-pub struct CollectionConfig {
-    pub owner: ContractAddress,
-    pub collection_issuer: ContractAddress,
-    pub ip_nft: ContractAddress,
-    pub ip_nft_class_hash: ClassHash,
-    pub total_contributions: u256,
-    pub total_minted: u256,
-    pub uri_policy: felt252,
-}
-
-#[derive(Drop, Serde, starknet::Store)]
+/// One entry per `create_contribution_type` call, stored at
+/// `types[type_id]`. `max_supply` is zero iff the type was never created —
+/// used as the existence check (`create_contribution_type` rejects a zero
+/// max_supply). `max_supply` caps approvals; `minted_count` can only trail
+/// `approved_count`.
+#[derive(Drop, Serde, starknet::Store, Clone)]
 pub struct ContributionType {
-    pub type_id: felt252,
-    pub min_quality_score: u8,
-    pub submission_deadline: u64,
     pub max_supply: u256,
     pub approved_count: u256,
     pub minted_count: u256,
-    pub exists: bool,
-}
-
-#[derive(Drop, Serde, starknet::Store)]
-pub struct Contribution {
-    pub contribution_id: u256,
-    pub contributor: ContractAddress,
-    pub token_uri: ByteArray,
-    pub contribution_type: felt252,
-    pub quality_score: u8,
-    pub submitted_at: u64,
-    pub reviewed_at: u64,
-    pub minted_at: u64,
-    pub status: u8,
-    pub token_id: u256,
-}
-
-#[derive(Drop, Serde, starknet::Store)]
-pub struct TokenData {
-    pub ip_nft: ContractAddress,
-    pub token_id: u256,
-    pub contribution_id: u256,
-    pub owner: ContractAddress,
+    pub submission_deadline: Option<u64>,
     pub metadata_uri: ByteArray,
+}
+
+/// One entry per `submit_contribution` call, stored at
+/// `contributions[contribution_id]`. `contributor` is zero iff the
+/// contribution was never submitted. `token_id` is set when the approved
+/// contributor mints.
+#[derive(Drop, Serde, starknet::Store, Clone)]
+pub struct Contribution {
     pub contributor: ContractAddress,
-    pub registered_at: u64,
+    pub type_id: u256,
+    pub token_uri: ByteArray,
+    pub royalty_bps: u16,
+    pub status: ContributionStatus,
+    pub token_id: u256,
+}
+
+#[derive(Drop, Copy, Serde, PartialEq, starknet::Store)]
+pub enum ContributionStatus {
+    #[default]
+    Pending,
+    Approved,
+    Rejected,
+    Minted,
 }
 
 pub fn bytearray_starts_with(haystack: @ByteArray, needle: @ByteArray) -> bool {
@@ -74,30 +52,4 @@ pub fn bytearray_starts_with(haystack: @ByteArray, needle: @ByteArray) -> bool {
         i += 1;
     }
     matches
-}
-
-#[cfg(test)]
-mod tests {
-    use super::bytearray_starts_with;
-
-    #[test]
-    fn test_bytearray_starts_with_ipfs() {
-        let uri: ByteArray = "ipfs://QmFoo";
-        let prefix: ByteArray = "ipfs://";
-        assert(bytearray_starts_with(@uri, @prefix), 'should match ipfs');
-    }
-
-    #[test]
-    fn test_bytearray_starts_with_ar() {
-        let uri: ByteArray = "ar://txid123";
-        let prefix: ByteArray = "ar://";
-        assert(bytearray_starts_with(@uri, @prefix), 'should match ar');
-    }
-
-    #[test]
-    fn test_bytearray_starts_with_http_fails() {
-        let uri: ByteArray = "https://example.com";
-        let prefix: ByteArray = "ipfs://";
-        assert(!bytearray_starts_with(@uri, @prefix), 'should not match');
-    }
 }

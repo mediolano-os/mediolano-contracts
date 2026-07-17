@@ -106,12 +106,14 @@ Settings are identity-like private state. They should not become assets unless a
 
 ### IP Syndication
 
-`IP-Syndication` is an ERC-1155-backed funding and participation protocol.
+`IP-Syndication` is an ERC-1155-backed funding and participation protocol: a
+per-creator `IPSyndicationCollection` (deployed by an ownerless factory) where
+each campaign is one token id and shares are fungible units of that id.
 
 - `asset_standard`: ERC1155
 - `asset_role`: transferable syndication share and funded participation receipt
 - `transferability`: transferable
-- `access_semantics`: shares are minted from completed funding participation; proceeds and refunds derive from escrow records
+- `access_semantics`: shares are minted from completed funding participation; escrow, proceeds, and refunds derive from per-participant positions; participants can withdraw unconditionally while a campaign is active
 - `marketplace_visibility`: display/index and tradable as syndication shares
 
 Syndication shares are intentionally market-facing, so transferability is part of the protocol design rather than a side effect of visibility.

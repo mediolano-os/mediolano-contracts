@@ -1,54 +1,36 @@
 use starknet::ContractAddress;
 
-#[derive(Drop, Clone, Serde, starknet::Store)]
-pub struct IPMetadata {
-    pub ip_id: u256,
-    pub owner: ContractAddress,
+/// One entry per `create_syndication` call, stored at `syndications[token_id]`.
+/// `target_amount` is zero iff the syndication was never created — used as the
+/// existence check (`create_syndication` rejects a zero target).
+#[derive(Drop, Serde, starknet::Store, Clone)]
+pub struct Syndication {
     pub target_amount: u256,
-    pub name: felt252,
-    pub description: ByteArray,
-    pub metadata_uri: ByteArray,
-    pub licensing_terms: felt252,
-    pub token_id: u256,
-    pub exists: bool,
-}
-
-#[derive(Drop, Copy, Serde, starknet::Store)]
-pub struct SyndicationDetails {
-    pub ip_id: u256,
-    pub status: Status,
-    pub mode: Mode,
     pub total_raised: u256,
-    pub participant_count: u256,
     pub payment_token: ContractAddress,
+    pub whitelist: bool,
+    pub status: Status,
     pub proceeds_claimed: bool,
-    pub exists: bool,
+    pub royalty_bps: u16,
+    pub metadata_uri: ByteArray,
 }
 
+/// A participant's escrow position in one syndication, stored at
+/// `positions[(token_id, participant)]`. `deposited` is the live escrowed
+/// balance — deposits raise it, withdrawals and refunds lower it, and after
+/// completion it is the exact number of shares the participant can mint.
 #[derive(Drop, Copy, Serde, starknet::Store)]
-pub struct ParticipantDetails {
-    pub participant: ContractAddress,
-    pub amount_deposited: u256,
-    pub amount_refunded: u256,
-    pub share: u256,
-    pub share_minted: bool,
-    pub exists: bool,
+pub struct Position {
+    pub deposited: u256,
+    pub shares_minted: bool,
 }
 
 #[derive(Drop, Copy, Serde, PartialEq, starknet::Store)]
 pub enum Status {
     #[default]
-    Pending,
     Active,
     Completed,
     Cancelled,
-}
-
-#[derive(Drop, Copy, Serde, PartialEq, starknet::Store)]
-pub enum Mode {
-    #[default]
-    Public,
-    Whitelist,
 }
 
 pub fn bytearray_starts_with(haystack: @ByteArray, needle: @ByteArray) -> bool {
@@ -56,7 +38,6 @@ pub fn bytearray_starts_with(haystack: @ByteArray, needle: @ByteArray) -> bool {
     if haystack.len() < n {
         return false;
     }
-
     let mut i: u32 = 0;
     let mut matches = true;
     while i < n {
@@ -66,6 +47,5 @@ pub fn bytearray_starts_with(haystack: @ByteArray, needle: @ByteArray) -> bool {
         }
         i += 1;
     }
-
     matches
 }

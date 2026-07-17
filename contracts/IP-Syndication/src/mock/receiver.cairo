@@ -1,5 +1,5 @@
 #[starknet::contract]
-mod MockERC1155Receiver {
+pub mod Receiver {
     use openzeppelin_introspection::src5::SRC5Component;
     use openzeppelin_token::erc1155::ERC1155ReceiverComponent;
 
@@ -9,9 +9,16 @@ mod MockERC1155Receiver {
     component!(path: SRC5Component, storage: src5, event: SRC5Event);
 
     #[abi(embed_v0)]
-    impl ERC1155ReceiverMixinImpl =
-        ERC1155ReceiverComponent::ERC1155ReceiverMixinImpl<ContractState>;
+    impl ERC1155ReceiverImpl =
+        ERC1155ReceiverComponent::ERC1155ReceiverImpl<ContractState>;
+    #[abi(embed_v0)]
+    impl ERC1155ReceiverCamelImpl =
+        ERC1155ReceiverComponent::ERC1155ReceiverCamelImpl<ContractState>;
     impl ERC1155ReceiverInternalImpl = ERC1155ReceiverComponent::InternalImpl<ContractState>;
+
+    #[abi(embed_v0)]
+    impl SRC5Impl = SRC5Component::SRC5Impl<ContractState>;
+    impl SRC5InternalImpl = SRC5Component::InternalImpl<ContractState>;
 
     #[storage]
     struct Storage {

@@ -5,29 +5,35 @@ pub trait IMaliciousERC20Config<TContractState> {
     fn configure_attack(
         ref self: TContractState,
         target: ContractAddress,
-        ip_id: u256,
+        token_id: u256,
         mode: u8,
         reentry_amount: u256,
     );
 }
 
+/// ERC-20 that attacks the syndication collection from inside its own
+/// transfer hooks — reentering deposit/withdraw/refund/proceeds, or
+/// short-transferring on transfer_from (fee-on-transfer behavior).
 #[starknet::contract]
-mod MaliciousERC20 {
+pub mod MaliciousERC20 {
     use core::num::traits::Zero;
-    use ip_syndication::interface::{IIPSyndicationDispatcher, IIPSyndicationDispatcherTrait};
-    use ip_syndication::mock::erc20::IERC20Mint;
-    use ip_syndication::mock::malicious_erc20::IMaliciousERC20Config;
     use openzeppelin_token::erc20::interface::IERC20;
     use openzeppelin_token::erc20::{ERC20Component, ERC20HooksEmptyImpl};
     use starknet::storage::{
         StorageMapReadAccess, StoragePointerReadAccess, StoragePointerWriteAccess,
     };
     use starknet::{ContractAddress, get_caller_address};
+    use crate::interface::{
+        IIPSyndicationCollectionDispatcher, IIPSyndicationCollectionDispatcherTrait,
+    };
+    use crate::mock::mock_erc20::IERC20Mint;
+    use super::IMaliciousERC20Config;
 
-    const ATTACK_DEPOSIT: u8 = 1;
-    const ATTACK_REFUND: u8 = 2;
-    const ATTACK_PROCEEDS: u8 = 3;
-    const SHORT_TRANSFER_FROM: u8 = 4;
+    pub const ATTACK_DEPOSIT: u8 = 1;
+    pub const ATTACK_WITHDRAW: u8 = 2;
+    pub const ATTACK_REFUND: u8 = 3;
+    pub const ATTACK_PROCEEDS: u8 = 4;
+    pub const SHORT_TRANSFER_FROM: u8 = 5;
 
     component!(path: ERC20Component, storage: erc20, event: ERC20Event);
 
@@ -38,7 +44,7 @@ mod MaliciousERC20 {
         #[substorage(v0)]
         erc20: ERC20Component::Storage,
         target: ContractAddress,
-        ip_id: u256,
+        token_id: u256,
         mode: u8,
         reentry_amount: u256,
     }
@@ -51,11 +57,8 @@ mod MaliciousERC20 {
     }
 
     #[constructor]
-    fn constructor(ref self: ContractState, name: ByteArray, symbol: ByteArray, supply: u256) {
+    fn constructor(ref self: ContractState, name: ByteArray, symbol: ByteArray) {
         self.erc20.initializer(name, symbol);
-        if supply > 0 {
-            self.erc20.mint(get_caller_address(), supply);
-        }
     }
 
     #[abi(embed_v0)]
@@ -117,12 +120,12 @@ mod MaliciousERC20 {
         fn configure_attack(
             ref self: ContractState,
             target: ContractAddress,
-            ip_id: u256,
+            token_id: u256,
             mode: u8,
             reentry_amount: u256,
         ) {
             self.target.write(target);
-            self.ip_id.write(ip_id);
+            self.token_id.write(token_id);
             self.mode.write(mode);
             self.reentry_amount.write(reentry_amount);
         }
@@ -134,8 +137,11 @@ mod MaliciousERC20 {
             if self.mode.read() == ATTACK_DEPOSIT {
                 let target = self.target.read();
                 if !target.is_zero() {
-                    IIPSyndicationDispatcher { contract_address: target }
-                        .deposit(self.ip_id.read(), self.reentry_amount.read());
+                    // Single-shot: clear the mode before reentering so the
+                    // nested deposit's own transfer_from doesn't recurse.
+                    self.mode.write(0);
+                    IIPSyndicationCollectionDispatcher { contract_address: target }
+                        .deposit(self.token_id.read(), self.reentry_amount.read());
                 }
             }
         }
@@ -147,12 +153,15 @@ mod MaliciousERC20 {
             }
 
             let mode = self.mode.read();
-            let syndication = IIPSyndicationDispatcher { contract_address: target };
+            let collection = IIPSyndicationCollectionDispatcher { contract_address: target };
+            if mode == ATTACK_WITHDRAW {
+                collection.withdraw(self.token_id.read(), self.reentry_amount.read());
+            }
             if mode == ATTACK_REFUND {
-                syndication.claim_refund(self.ip_id.read());
+                collection.claim_refund(self.token_id.read());
             }
             if mode == ATTACK_PROCEEDS {
-                syndication.claim_proceeds(self.ip_id.read());
+                collection.claim_proceeds(self.token_id.read());
             }
         }
     }

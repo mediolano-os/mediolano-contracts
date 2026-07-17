@@ -6,7 +6,7 @@ pub trait IERC20Mint<TContractState> {
 }
 
 #[starknet::contract]
-mod MockERC20 {
+pub mod MockERC20 {
     use openzeppelin_token::erc20::{ERC20Component, ERC20HooksEmptyImpl};
     use starknet::ContractAddress;
     use super::IERC20Mint;
@@ -31,15 +31,14 @@ mod MockERC20 {
     }
 
     #[constructor]
-    fn constructor(ref self: ContractState, name: ByteArray, symbol: ByteArray, supply: u256) {
+    fn constructor(
+        ref self: ContractState, name: ByteArray, symbol: ByteArray, fixed_supply: u256,
+    ) {
         self.erc20.initializer(name, symbol);
-        if supply > 0 {
-            self.erc20.mint(starknet::get_caller_address(), supply);
-        }
     }
 
     #[abi(embed_v0)]
-    impl MintImpl of IERC20Mint<ContractState> {
+    impl ImplERC20Mint of IERC20Mint<ContractState> {
         fn mint(ref self: ContractState, recipient: ContractAddress, amount: u256) {
             self.erc20.mint(recipient, amount);
         }

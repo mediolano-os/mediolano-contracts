@@ -1,1 +1,2 @@
-pub mod test_ip_syndication;
+mod test_ip_syndication_collection;
+mod test_ip_syndication_collection_factory;

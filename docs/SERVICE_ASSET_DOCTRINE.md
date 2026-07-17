@@ -118,12 +118,12 @@ Syndication shares are intentionally market-facing, so transferability is part o
 
 ### IP Commission Escrow
 
-`IP-Commission-Escrow` mints a non-transferable ERC-721 offer asset for custom creative work.
+`IP-Commission-Escrow` mints a non-transferable ERC-721 offer asset for custom creative work. The full budget escrows in the creation transaction; milestones release it.
 
 - `asset_standard`: ERC721
 - `asset_role`: commission offer / escrow record
 - `transferability`: non-transferable
-- `access_semantics`: creator acceptance, milestone approval, claims, and refunds derive from escrow records
+- `access_semantics`: creator acceptance, milestone approval, claims, and refunds derive from escrow records; a milestone left under review past the commissioner's own `review_period` becomes claimable by the creator, and the creator can abandon at any time (earned kept, unearned refunded)
 - `marketplace_visibility`: display/index as an offer asset; no default listing or resale
 
 The offer asset makes the commission visible to the marketplace without making the commissioner intent itself tradable.

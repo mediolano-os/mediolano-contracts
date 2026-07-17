@@ -1,60 +1,52 @@
 #[starknet::contract]
 pub mod IPCommissionEscrow {
     use core::num::traits::Zero;
-    use ip_commission_escrow::errors::Errors;
-    use ip_commission_escrow::interface::{IIPCommissionEscrow, IIP_COMMISSION_ESCROW_ID};
-    use ip_commission_escrow::types::{
-        Commission, CommissionStatus, MilestoneDetails, MilestoneStatus, OfferMode,
-        bytearray_starts_with,
-    };
     use openzeppelin_introspection::src5::SRC5Component;
     use openzeppelin_token::erc20::interface::{IERC20Dispatcher, IERC20DispatcherTrait};
     use openzeppelin_token::erc721::ERC721Component;
-    use openzeppelin_token::erc721::ERC721Component::InternalTrait as ERC721InternalTrait;
-    use openzeppelin_token::erc721::interface::IERC721Metadata;
+    use openzeppelin_token::erc721::interface::{IERC721Metadata, IERC721MetadataCamelOnly};
     use starknet::storage::{
-        Map, StoragePathEntry, StoragePointerReadAccess, StoragePointerWriteAccess,
+        Map, StorageMapReadAccess, StorageMapWriteAccess, StoragePointerReadAccess,
+        StoragePointerWriteAccess,
     };
     use starknet::{ContractAddress, get_block_timestamp, get_caller_address, get_contract_address};
+    use crate::interface::{IIPCommissionEscrow, IIP_COMMISSION_ESCROW_ID};
+    use crate::types::{
+        Commission, CommissionStatus, Milestone, MilestoneStatus, bytearray_starts_with,
+    };
 
-    component!(path: SRC5Component, storage: src5, event: SRC5Event);
     component!(path: ERC721Component, storage: erc721, event: ERC721Event);
-
-    #[abi(embed_v0)]
-    impl SRC5Impl = SRC5Component::SRC5Impl<ContractState>;
-    impl SRC5InternalImpl = SRC5Component::InternalImpl<ContractState>;
+    component!(path: SRC5Component, storage: src5, event: SRC5Event);
 
     #[abi(embed_v0)]
     impl ERC721Impl = ERC721Component::ERC721Impl<ContractState>;
     #[abi(embed_v0)]
     impl ERC721CamelOnlyImpl = ERC721Component::ERC721CamelOnlyImpl<ContractState>;
+    #[abi(embed_v0)]
+    impl SRC5Impl = SRC5Component::SRC5Impl<ContractState>;
+
     impl ERC721InternalImpl = ERC721Component::InternalImpl<ContractState>;
+    impl SRC5InternalImpl = SRC5Component::InternalImpl<ContractState>;
 
     #[storage]
     struct Storage {
         #[substorage(v0)]
-        src5: SRC5Component::Storage,
-        #[substorage(v0)]
         erc721: ERC721Component::Storage,
-        last_commission_id: u256,
+        #[substorage(v0)]
+        src5: SRC5Component::Storage,
+        next_commission_id: u256,
         commissions: Map<u256, Commission>,
-        milestones: Map<(u256, u32), MilestoneDetails>,
-        token_uris: Map<u256, ByteArray>,
-        deliverable_uris: Map<(u256, u32), ByteArray>,
-        creator_claims: Map<(u256, ContractAddress), u256>,
-        commissioner_refunds: Map<(u256, ContractAddress), u256>,
-        reentrancy_locked: bool,
+        milestones: Map<(u256, u32), Milestone>,
     }
 
     #[event]
     #[derive(Drop, starknet::Event)]
     pub enum Event {
         #[flat]
-        SRC5Event: SRC5Component::Event,
-        #[flat]
         ERC721Event: ERC721Component::Event,
+        #[flat]
+        SRC5Event: SRC5Component::Event,
         CommissionCreated: CommissionCreated,
-        CommissionFunded: CommissionFunded,
         CommissionAccepted: CommissionAccepted,
         MilestoneSubmitted: MilestoneSubmitted,
         MilestoneRevisionRequested: MilestoneRevisionRequested,
@@ -75,19 +67,11 @@ pub mod IPCommissionEscrow {
         pub invited_creator: ContractAddress,
         pub payment_token: ContractAddress,
         pub total_amount: u256,
-        pub mode: OfferMode,
         pub milestone_count: u32,
+        pub deadline: u64,
+        pub review_period: u64,
         pub brief_uri: ByteArray,
-        pub license_uri: ByteArray,
-    }
-
-    #[derive(Drop, starknet::Event)]
-    pub struct CommissionFunded {
-        #[key]
-        pub commission_id: u256,
-        #[key]
-        pub commissioner: ContractAddress,
-        pub amount: u256,
+        pub created_at: u64,
     }
 
     #[derive(Drop, starknet::Event)]
@@ -96,6 +80,7 @@ pub mod IPCommissionEscrow {
         pub commission_id: u256,
         #[key]
         pub creator: ContractAddress,
+        pub accepted_at: u64,
     }
 
     #[derive(Drop, starknet::Event)]
@@ -104,10 +89,8 @@ pub mod IPCommissionEscrow {
         pub commission_id: u256,
         #[key]
         pub milestone_index: u32,
-        #[key]
-        pub creator: ContractAddress,
         pub deliverable_uri: ByteArray,
-        pub deliverable_hash: felt252,
+        pub submitted_at: u64,
     }
 
     #[derive(Drop, starknet::Event)]
@@ -126,6 +109,10 @@ pub mod IPCommissionEscrow {
         #[key]
         pub milestone_index: u32,
         pub amount: u256,
+        /// The commissioner, or the creator when approval came from the
+        /// review-window timeout.
+        pub approver: ContractAddress,
+        pub approved_at: u64,
     }
 
     #[derive(Drop, starknet::Event)]
@@ -139,6 +126,9 @@ pub mod IPCommissionEscrow {
     pub struct CommissionCancelled {
         #[key]
         pub commission_id: u256,
+        /// The commissioner (cancel) or the creator (abandon).
+        #[key]
+        pub ended_by: ContractAddress,
         pub refund_amount: u256,
     }
 
@@ -164,8 +154,10 @@ pub mod IPCommissionEscrow {
     fn constructor(ref self: ContractState) {
         self.erc721.initializer("Mediolano Commission Offer", "MCOM", "");
         self.src5.register_interface(IIP_COMMISSION_ESCROW_ID);
+        self.next_commission_id.write(1);
     }
 
+    /// Offer records are non-transferable: only minting (from == 0) passes.
     impl ERC721HooksImpl of ERC721Component::ERC721HooksTrait<ContractState> {
         fn before_update(
             ref self: ERC721Component::ComponentState<ContractState>,
@@ -174,119 +166,118 @@ pub mod IPCommissionEscrow {
             auth: ContractAddress,
         ) {
             let from = self._owner_of(token_id);
-            if !from.is_zero() && !to.is_zero() {
-                assert(false, Errors::NON_TRANSFERABLE);
-            }
+            assert(from.is_zero(), 'Offer is non-transferable');
         }
+
+        fn after_update(
+            ref self: ERC721Component::ComponentState<ContractState>,
+            to: ContractAddress,
+            token_id: u256,
+            auth: ContractAddress,
+        ) {}
     }
 
+    /// token_uri resolves to the commission's brief.
     #[abi(embed_v0)]
     impl ERC721MetadataImpl of IERC721Metadata<ContractState> {
         fn name(self: @ContractState) -> ByteArray {
-            "Mediolano Commission Offer"
+            self.erc721.ERC721_name.read()
         }
 
         fn symbol(self: @ContractState) -> ByteArray {
-            "MCOM"
+            self.erc721.ERC721_symbol.read()
         }
 
         fn token_uri(self: @ContractState, token_id: u256) -> ByteArray {
-            self.token_uris.entry(token_id).read()
+            self.erc721._require_owned(token_id);
+            self.commissions.read(token_id).brief_uri
         }
     }
 
     #[abi(embed_v0)]
-    pub impl CommissionEscrowImpl of IIPCommissionEscrow<ContractState> {
+    impl ERC721MetadataCamelOnlyImpl of IERC721MetadataCamelOnly<ContractState> {
+        fn tokenURI(self: @ContractState, tokenId: u256) -> ByteArray {
+            self.token_uri(tokenId)
+        }
+    }
+
+    #[abi(embed_v0)]
+    pub impl IPCommissionEscrowImpl of IIPCommissionEscrow<ContractState> {
         fn create_commission(
             ref self: ContractState,
             invited_creator: ContractAddress,
             payment_token: ContractAddress,
-            total_amount: u256,
             brief_uri: ByteArray,
-            brief_hash: felt252,
-            license_uri: ByteArray,
-            license_hash: felt252,
             revisions_allowed: u32,
             deadline: u64,
+            review_period: u64,
             milestone_amounts: Array<u256>,
         ) -> u256 {
             let commissioner = get_caller_address();
-            assert(!commissioner.is_zero(), Errors::INVALID_CREATOR);
-            assert(!payment_token.is_zero(), Errors::INVALID_PAYMENT_TOKEN);
-            assert(total_amount > 0, Errors::AMOUNT_IS_ZERO);
-            assert(brief_hash != 0, Errors::INVALID_HASH);
-            assert(license_hash != 0, Errors::INVALID_HASH);
+            assert(!payment_token.is_zero(), 'Payment token is zero');
+            assert(deadline > get_block_timestamp(), 'Deadline in the past');
+            assert(review_period > 0, 'Review period is zero');
+            if !invited_creator.is_zero() {
+                assert(invited_creator != commissioner, 'Invited is commissioner');
+            }
             assert_content_addressed(@brief_uri);
-            assert_content_addressed(@license_uri);
-            assert(deadline > get_block_timestamp(), Errors::DEADLINE_EXPIRED);
 
             let milestone_count = milestone_amounts.len();
-            assert(milestone_count > 0, Errors::INVALID_MILESTONES);
+            assert(milestone_count > 0, 'No milestones');
 
-            let commission_id = self.last_commission_id.read() + 1;
-            let mode = if invited_creator.is_zero() {
-                OfferMode::Open
-            } else {
-                assert(invited_creator != commissioner, Errors::INVALID_CREATOR);
-                OfferMode::Exclusive
-            };
+            let commission_id = self.next_commission_id.read();
+            self.next_commission_id.write(commission_id + 1);
 
-            let mut total_from_milestones: u256 = 0;
+            let mut total_amount: u256 = 0;
             let mut index: u32 = 0;
-            loop {
-                if index == milestone_count {
-                    break;
-                }
+            while index < milestone_count {
                 let amount = *milestone_amounts.at(index);
-                assert(amount > 0, Errors::AMOUNT_IS_ZERO);
-                total_from_milestones += amount;
+                assert(amount > 0, 'Milestone amount is zero');
+                total_amount += amount;
                 self
                     .milestones
-                    .entry((commission_id, index))
                     .write(
-                        MilestoneDetails {
-                            commission_id,
-                            milestone_index: index,
+                        (commission_id, index),
+                        Milestone {
                             amount,
                             status: MilestoneStatus::Pending,
                             revision_count: 0,
-                            deliverable_hash: 0,
                             submitted_at: 0,
-                            approved_at: 0,
-                            exists: true,
+                            deliverable_uri: "",
                         },
                     );
                 index += 1;
             }
-            assert(total_from_milestones == total_amount, Errors::INVALID_MILESTONES);
 
             let commission = Commission {
-                commission_id,
                 commissioner,
                 invited_creator,
                 creator: Zero::zero(),
                 payment_token,
                 total_amount,
-                escrowed_amount: 0,
                 released_amount: 0,
-                refunded_amount: 0,
                 milestone_count,
                 approved_milestone_count: 0,
                 revisions_allowed,
                 deadline,
+                review_period,
                 status: CommissionStatus::Open,
-                mode,
                 brief_uri: brief_uri.clone(),
-                brief_hash,
-                license_uri: license_uri.clone(),
-                license_hash,
-                exists: true,
+                creator_claim: 0,
+                commissioner_refund: 0,
             };
+            self.commissions.write(commission_id, commission);
 
-            self.commissions.entry(commission_id).write(commission);
-            self.token_uris.entry(commission_id).write(brief_uri.clone());
-            self.last_commission_id.write(commission_id);
+            // The offer record; mint has no receiver callback.
             self.erc721.mint(commissioner, commission_id);
+
+            // Escrow the full budget — external call after state is final.
+            let token = IERC20Dispatcher { contract_address: payment_token };
+            let this = get_contract_address();
+            let balance_before = token.balance_of(this);
+            let success = token.transfer_from(commissioner, this, total_amount);
+            assert(success, 'Payment failed');
+            assert(token.balance_of(this) - balance_before >= total_amount, 'Payment failed');
 
             self
                 .emit(
@@ -296,61 +287,37 @@ pub mod IPCommissionEscrow {
                         invited_creator,
                         payment_token,
                         total_amount,
-                        mode,
                         milestone_count,
+                        deadline,
+                        review_period,
                         brief_uri,
-                        license_uri,
+                        created_at: get_block_timestamp(),
                     },
                 );
 
             commission_id
         }
 
-        fn fund_commission(ref self: ContractState, commission_id: u256) -> u256 {
-            self.enter_non_reentrant();
-            let caller = get_caller_address();
-            let mut commission = self.get_existing_commission(commission_id);
-            assert(caller == commission.commissioner, Errors::NOT_COMMISSIONER);
-            assert(commission.status == CommissionStatus::Open, Errors::INVALID_STATUS);
-
-            let token = IERC20Dispatcher { contract_address: commission.payment_token };
-            let contract_address = get_contract_address();
-            let balance_before = token.balance_of(contract_address);
-            let success = token.transfer_from(caller, contract_address, commission.total_amount);
-            assert(success, Errors::PAYMENT_FAILED);
-            let balance_after = token.balance_of(contract_address);
-            assert(
-                balance_after - balance_before == commission.total_amount, Errors::PAYMENT_FAILED,
-            );
-
-            commission.escrowed_amount = commission.total_amount;
-            commission.status = CommissionStatus::Funded;
-            let funded_amount = commission.total_amount;
-            self.commissions.entry(commission_id).write(commission);
-            self.exit_non_reentrant();
-
-            self
-                .emit(
-                    CommissionFunded { commission_id, commissioner: caller, amount: funded_amount },
-                );
-
-            funded_amount
-        }
-
         fn accept_commission(ref self: ContractState, commission_id: u256) {
             let caller = get_caller_address();
-            let mut commission = self.get_existing_commission(commission_id);
-            assert(commission.status == CommissionStatus::Funded, Errors::INVALID_STATUS);
-            self.assert_before_deadline(commission.deadline);
-            assert(caller != commission.commissioner, Errors::INVALID_CREATOR);
-            if commission.mode == OfferMode::Exclusive {
-                assert(caller == commission.invited_creator, Errors::NOT_INVITED_CREATOR);
+            let mut commission = self.get_existing(commission_id);
+            assert(commission.status == CommissionStatus::Open, 'Commission not open');
+            assert(get_block_timestamp() <= commission.deadline, 'Deadline passed');
+            assert(caller != commission.commissioner, 'Commissioner cannot accept');
+            if !commission.invited_creator.is_zero() {
+                assert(caller == commission.invited_creator, 'Not the invited creator');
             }
 
             commission.creator = caller;
             commission.status = CommissionStatus::InProgress;
-            self.commissions.entry(commission_id).write(commission);
-            self.emit(CommissionAccepted { commission_id, creator: caller });
+            self.commissions.write(commission_id, commission);
+
+            self
+                .emit(
+                    CommissionAccepted {
+                        commission_id, creator: caller, accepted_at: get_block_timestamp(),
+                    },
+                );
         }
 
         fn submit_milestone(
@@ -358,239 +325,256 @@ pub mod IPCommissionEscrow {
             commission_id: u256,
             milestone_index: u32,
             deliverable_uri: ByteArray,
-            deliverable_hash: felt252,
         ) {
             let caller = get_caller_address();
-            let commission = self.get_existing_commission(commission_id);
-            assert(commission.status == CommissionStatus::InProgress, Errors::INVALID_STATUS);
-            self.assert_before_deadline(commission.deadline);
-            assert(caller == commission.creator, Errors::NOT_CREATOR);
-            assert(deliverable_hash != 0, Errors::INVALID_HASH);
+            let commission = self.get_existing(commission_id);
+            assert(commission.status == CommissionStatus::InProgress, 'Commission not in progress');
+            assert(caller == commission.creator, 'Not the creator');
+            assert(get_block_timestamp() <= commission.deadline, 'Deadline passed');
             assert_content_addressed(@deliverable_uri);
 
             if milestone_index > 0 {
                 let previous = self.get_existing_milestone(commission_id, milestone_index - 1);
-                assert(
-                    previous.status == MilestoneStatus::Approved, Errors::PREVIOUS_MILESTONE_OPEN,
-                );
+                assert(previous.status == MilestoneStatus::Approved, 'Previous milestone open');
             }
 
             let mut milestone = self.get_existing_milestone(commission_id, milestone_index);
             assert(
                 milestone.status == MilestoneStatus::Pending
                     || milestone.status == MilestoneStatus::RevisionRequested,
-                Errors::INVALID_STATUS,
+                'Milestone not submittable',
             );
+
+            let submitted_at = get_block_timestamp();
             milestone.status = MilestoneStatus::Submitted;
-            milestone.deliverable_hash = deliverable_hash;
-            milestone.submitted_at = get_block_timestamp();
-            self.milestones.entry((commission_id, milestone_index)).write(milestone);
-            self
-                .deliverable_uris
-                .entry((commission_id, milestone_index))
-                .write(deliverable_uri.clone());
+            milestone.submitted_at = submitted_at;
+            milestone.deliverable_uri = deliverable_uri.clone();
+            self.milestones.write((commission_id, milestone_index), milestone);
 
             self
                 .emit(
                     MilestoneSubmitted {
-                        commission_id,
-                        milestone_index,
-                        creator: caller,
-                        deliverable_uri,
-                        deliverable_hash,
-                    },
-                );
-        }
-
-        fn request_revision(ref self: ContractState, commission_id: u256, milestone_index: u32) {
-            let caller = get_caller_address();
-            let commission = self.get_existing_commission(commission_id);
-            assert(caller == commission.commissioner, Errors::NOT_COMMISSIONER);
-            assert(commission.status == CommissionStatus::InProgress, Errors::INVALID_STATUS);
-
-            let mut milestone = self.get_existing_milestone(commission_id, milestone_index);
-            assert(milestone.status == MilestoneStatus::Submitted, Errors::INVALID_STATUS);
-            assert(
-                milestone.revision_count < commission.revisions_allowed,
-                Errors::REVISION_LIMIT_REACHED,
-            );
-            milestone.revision_count += 1;
-            milestone.status = MilestoneStatus::RevisionRequested;
-            self.milestones.entry((commission_id, milestone_index)).write(milestone);
-
-            self
-                .emit(
-                    MilestoneRevisionRequested {
-                        commission_id, milestone_index, revision_count: milestone.revision_count,
+                        commission_id, milestone_index, deliverable_uri, submitted_at,
                     },
                 );
         }
 
         fn approve_milestone(ref self: ContractState, commission_id: u256, milestone_index: u32) {
             let caller = get_caller_address();
-            let mut commission = self.get_existing_commission(commission_id);
-            assert(caller == commission.commissioner, Errors::NOT_COMMISSIONER);
-            assert(commission.status == CommissionStatus::InProgress, Errors::INVALID_STATUS);
+            let commission = self.get_existing(commission_id);
+            assert(caller == commission.commissioner, 'Not the commissioner');
+            self.approve_submitted(commission_id, milestone_index, caller);
+        }
+
+        fn request_revision(ref self: ContractState, commission_id: u256, milestone_index: u32) {
+            let caller = get_caller_address();
+            let commission = self.get_existing(commission_id);
+            assert(caller == commission.commissioner, 'Not the commissioner');
+            assert(commission.status == CommissionStatus::InProgress, 'Commission not in progress');
 
             let mut milestone = self.get_existing_milestone(commission_id, milestone_index);
-            assert(milestone.status == MilestoneStatus::Submitted, Errors::INVALID_STATUS);
-            milestone.status = MilestoneStatus::Approved;
-            milestone.approved_at = get_block_timestamp();
+            assert(milestone.status == MilestoneStatus::Submitted, 'Milestone not under review');
+            assert(
+                milestone.revision_count < commission.revisions_allowed, 'Revision limit reached',
+            );
 
-            commission.released_amount += milestone.amount;
-            commission.approved_milestone_count += 1;
-            let claim_key = (commission_id, commission.creator);
-            let creator_claim = self.creator_claims.entry(claim_key).read() + milestone.amount;
-            self.creator_claims.entry(claim_key).write(creator_claim);
-
-            if commission.approved_milestone_count == commission.milestone_count {
-                commission.status = CommissionStatus::Completed;
-            }
-            let is_completed = commission.status == CommissionStatus::Completed;
-            let released_amount = commission.released_amount;
-
-            self.milestones.entry((commission_id, milestone_index)).write(milestone);
-            self.commissions.entry(commission_id).write(commission);
+            milestone.revision_count += 1;
+            milestone.status = MilestoneStatus::RevisionRequested;
+            let revision_count = milestone.revision_count;
+            self.milestones.write((commission_id, milestone_index), milestone);
 
             self
                 .emit(
-                    MilestoneApproved { commission_id, milestone_index, amount: milestone.amount },
+                    MilestoneRevisionRequested { commission_id, milestone_index, revision_count },
                 );
-            if is_completed {
-                self.emit(CommissionCompleted { commission_id, released_amount });
-            }
+        }
+
+        fn claim_overdue_milestone(
+            ref self: ContractState, commission_id: u256, milestone_index: u32,
+        ) {
+            let caller = get_caller_address();
+            let commission = self.get_existing(commission_id);
+            assert(caller == commission.creator, 'Not the creator');
+
+            let milestone = self.get_existing_milestone(commission_id, milestone_index);
+            assert(milestone.status == MilestoneStatus::Submitted, 'Milestone not under review');
+            assert(
+                get_block_timestamp() > milestone.submitted_at + commission.review_period,
+                'Review window still open',
+            );
+
+            self.approve_submitted(commission_id, milestone_index, caller);
         }
 
         fn cancel_commission(ref self: ContractState, commission_id: u256) {
             let caller = get_caller_address();
-            let mut commission = self.get_existing_commission(commission_id);
-            assert(caller == commission.commissioner, Errors::NOT_COMMISSIONER);
-            let cancellable_before_accept = commission.status == CommissionStatus::Open
-                || commission.status == CommissionStatus::Funded;
-            let cancellable_after_deadline = commission.status == CommissionStatus::InProgress
-                && get_block_timestamp() > commission.deadline;
-            assert(cancellable_before_accept || cancellable_after_deadline, Errors::INVALID_STATUS);
+            let mut commission = self.get_existing(commission_id);
+            assert(caller == commission.commissioner, 'Not the commissioner');
 
-            let refund_amount = commission.escrowed_amount
-                - commission.released_amount
-                - commission.refunded_amount;
-            commission.status = CommissionStatus::Cancelled;
-            commission.refunded_amount += refund_amount;
-            self.commissions.entry(commission_id).write(commission);
-            if refund_amount > 0 {
-                let refund_key = (commission_id, caller);
-                let refund = self.commissioner_refunds.entry(refund_key).read() + refund_amount;
-                self.commissioner_refunds.entry(refund_key).write(refund);
+            if commission.status == CommissionStatus::InProgress {
+                assert(get_block_timestamp() > commission.deadline, 'Deadline not passed');
+                // Sequencing allows at most one milestone under review: the
+                // first unapproved one. A submission must be resolved —
+                // approved, revised, or timed out — before cancel can pass it.
+                if commission.approved_milestone_count < commission.milestone_count {
+                    let current = self
+                        .get_existing_milestone(commission_id, commission.approved_milestone_count);
+                    assert(current.status != MilestoneStatus::Submitted, 'Milestone under review');
+                }
+            } else {
+                assert(commission.status == CommissionStatus::Open, 'Commission not cancellable');
             }
 
-            self.emit(CommissionCancelled { commission_id, refund_amount });
+            self.settle_cancellation(commission_id, ref commission, caller);
+        }
+
+        fn abandon_commission(ref self: ContractState, commission_id: u256) {
+            let caller = get_caller_address();
+            let mut commission = self.get_existing(commission_id);
+            assert(caller == commission.creator, 'Not the creator');
+            assert(commission.status == CommissionStatus::InProgress, 'Commission not in progress');
+
+            self.settle_cancellation(commission_id, ref commission, caller);
         }
 
         fn claim_creator_funds(ref self: ContractState, commission_id: u256) -> u256 {
-            self.enter_non_reentrant();
             let caller = get_caller_address();
-            let commission = self.get_existing_commission(commission_id);
-            assert(caller == commission.creator, Errors::NOT_CREATOR);
-            let key = (commission_id, caller);
-            let amount = self.creator_claims.entry(key).read();
-            assert(amount > 0, Errors::NOTHING_TO_CLAIM);
-            self.creator_claims.entry(key).write(0);
+            let mut commission = self.get_existing(commission_id);
+            assert(caller == commission.creator, 'Not the creator');
 
-            let token = IERC20Dispatcher { contract_address: commission.payment_token };
+            let amount = commission.creator_claim;
+            assert(amount > 0, 'Nothing to claim');
+            commission.creator_claim = 0;
+            let payment_token = commission.payment_token;
+            self.commissions.write(commission_id, commission);
+
+            let token = IERC20Dispatcher { contract_address: payment_token };
             let success = token.transfer(caller, amount);
-            assert(success, Errors::PAYMENT_FAILED);
-            self.exit_non_reentrant();
+            assert(success, 'Payment failed');
 
             self.emit(CreatorFundsClaimed { commission_id, creator: caller, amount });
             amount
         }
 
         fn claim_commissioner_refund(ref self: ContractState, commission_id: u256) -> u256 {
-            self.enter_non_reentrant();
             let caller = get_caller_address();
-            let commission = self.get_existing_commission(commission_id);
-            assert(caller == commission.commissioner, Errors::NOT_COMMISSIONER);
-            let key = (commission_id, caller);
-            let amount = self.commissioner_refunds.entry(key).read();
-            assert(amount > 0, Errors::NOTHING_TO_CLAIM);
-            self.commissioner_refunds.entry(key).write(0);
+            let mut commission = self.get_existing(commission_id);
+            assert(caller == commission.commissioner, 'Not the commissioner');
 
-            let token = IERC20Dispatcher { contract_address: commission.payment_token };
+            let amount = commission.commissioner_refund;
+            assert(amount > 0, 'Nothing to claim');
+            commission.commissioner_refund = 0;
+            let payment_token = commission.payment_token;
+            self.commissions.write(commission_id, commission);
+
+            let token = IERC20Dispatcher { contract_address: payment_token };
             let success = token.transfer(caller, amount);
-            assert(success, Errors::PAYMENT_FAILED);
-            self.exit_non_reentrant();
+            assert(success, 'Payment failed');
 
             self.emit(CommissionerRefundClaimed { commission_id, commissioner: caller, amount });
             amount
         }
 
         fn get_commission(self: @ContractState, commission_id: u256) -> Commission {
-            self.get_existing_commission(commission_id)
+            self.get_existing(commission_id)
         }
 
         fn get_milestone(
             self: @ContractState, commission_id: u256, milestone_index: u32,
-        ) -> MilestoneDetails {
+        ) -> Milestone {
             self.get_existing_milestone(commission_id, milestone_index)
         }
 
-        fn get_milestone_deliverable_uri(
-            self: @ContractState, commission_id: u256, milestone_index: u32,
-        ) -> ByteArray {
-            self.get_existing_milestone(commission_id, milestone_index);
-            self.deliverable_uris.entry((commission_id, milestone_index)).read()
+        fn commission_count(self: @ContractState) -> u256 {
+            self.next_commission_id.read() - 1
         }
 
-        fn get_claimable_creator_funds(
-            self: @ContractState, commission_id: u256, creator: ContractAddress,
-        ) -> u256 {
-            self.creator_claims.entry((commission_id, creator)).read()
-        }
-
-        fn get_claimable_commissioner_refund(
-            self: @ContractState, commission_id: u256, commissioner: ContractAddress,
-        ) -> u256 {
-            self.commissioner_refunds.entry((commission_id, commissioner)).read()
-        }
-
-        fn get_last_commission_id(self: @ContractState) -> u256 {
-            self.last_commission_id.read()
+        fn version(self: @ContractState) -> ByteArray {
+            "1.0.0"
         }
     }
 
     #[generate_trait]
     impl InternalImpl of InternalTrait {
-        fn get_existing_commission(self: @ContractState, commission_id: u256) -> Commission {
-            let commission = self.commissions.entry(commission_id).read();
-            assert(commission.exists, Errors::COMMISSION_NOT_FOUND);
+        fn get_existing(self: @ContractState, commission_id: u256) -> Commission {
+            let commission = self.commissions.read(commission_id);
+            assert(!commission.commissioner.is_zero(), 'Commission not found');
             commission
         }
 
         fn get_existing_milestone(
             self: @ContractState, commission_id: u256, milestone_index: u32,
-        ) -> MilestoneDetails {
-            let milestone = self.milestones.entry((commission_id, milestone_index)).read();
-            assert(milestone.exists, Errors::MILESTONE_NOT_FOUND);
+        ) -> Milestone {
+            let milestone = self.milestones.read((commission_id, milestone_index));
+            assert(milestone.amount > 0, 'Milestone not found');
             milestone
         }
 
-        fn enter_non_reentrant(ref self: ContractState) {
-            assert(!self.reentrancy_locked.read(), Errors::REENTRANT_CALL);
-            self.reentrancy_locked.write(true);
+        /// Approves the milestone under review: credits the creator, and
+        /// completes the commission on the last approval. `approver` is the
+        /// commissioner, or the creator via the review-window timeout.
+        fn approve_submitted(
+            ref self: ContractState,
+            commission_id: u256,
+            milestone_index: u32,
+            approver: ContractAddress,
+        ) {
+            let mut commission = self.get_existing(commission_id);
+            assert(commission.status == CommissionStatus::InProgress, 'Commission not in progress');
+
+            let mut milestone = self.get_existing_milestone(commission_id, milestone_index);
+            assert(milestone.status == MilestoneStatus::Submitted, 'Milestone not under review');
+
+            milestone.status = MilestoneStatus::Approved;
+            let amount = milestone.amount;
+            self.milestones.write((commission_id, milestone_index), milestone);
+
+            commission.released_amount += amount;
+            commission.approved_milestone_count += 1;
+            commission.creator_claim += amount;
+            let completed = commission.approved_milestone_count == commission.milestone_count;
+            if completed {
+                commission.status = CommissionStatus::Completed;
+            }
+            let released_amount = commission.released_amount;
+            self.commissions.write(commission_id, commission);
+
+            self
+                .emit(
+                    MilestoneApproved {
+                        commission_id,
+                        milestone_index,
+                        amount,
+                        approver,
+                        approved_at: get_block_timestamp(),
+                    },
+                );
+            if completed {
+                self.emit(CommissionCompleted { commission_id, released_amount });
+            }
         }
 
-        fn exit_non_reentrant(ref self: ContractState) {
-            self.reentrancy_locked.write(false);
-        }
+        /// Shared terminal path for cancel (commissioner) and abandon
+        /// (creator): unreleased escrow becomes refundable, earned
+        /// milestones stay claimable.
+        fn settle_cancellation(
+            ref self: ContractState,
+            commission_id: u256,
+            ref commission: Commission,
+            ended_by: ContractAddress,
+        ) {
+            let refund_amount = commission.total_amount - commission.released_amount;
+            commission.status = CommissionStatus::Cancelled;
+            commission.commissioner_refund += refund_amount;
+            self.commissions.write(commission_id, commission.clone());
 
-        fn assert_before_deadline(self: @ContractState, deadline: u64) {
-            assert(get_block_timestamp() <= deadline, Errors::DEADLINE_EXPIRED);
+            self.emit(CommissionCancelled { commission_id, ended_by, refund_amount });
         }
     }
 
     fn assert_content_addressed(uri: @ByteArray) {
         let valid_uri = bytearray_starts_with(uri, @"ipfs://")
             || bytearray_starts_with(uri, @"ar://");
-        assert(valid_uri, Errors::INVALID_URI);
+        assert(valid_uri, 'URI must be ipfs:// or ar://');
     }
 }

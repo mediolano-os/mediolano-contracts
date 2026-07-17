@@ -7,23 +7,25 @@ pub trait IMaliciousERC20Config<TContractState> {
     );
 }
 
+/// ERC-20 that attacks the escrow from inside its own transfer hooks —
+/// reentering the claim entrypoints, or short-transferring on transfer_from
+/// (fee-on-transfer behavior).
 #[starknet::contract]
-mod MaliciousERC20 {
-    use ip_commission_escrow::interface::{
-        IIPCommissionEscrowDispatcher, IIPCommissionEscrowDispatcherTrait,
-    };
-    use ip_commission_escrow::malicious_erc20::IMaliciousERC20Config;
-    use ip_commission_escrow::mock_erc20::IERC20Mint;
+pub mod MaliciousERC20 {
+    use core::num::traits::Zero;
     use openzeppelin_token::erc20::interface::IERC20;
     use openzeppelin_token::erc20::{ERC20Component, ERC20HooksEmptyImpl};
     use starknet::storage::{
         StorageMapReadAccess, StoragePointerReadAccess, StoragePointerWriteAccess,
     };
     use starknet::{ContractAddress, get_caller_address};
+    use crate::interface::{IIPCommissionEscrowDispatcher, IIPCommissionEscrowDispatcherTrait};
+    use crate::mock::mock_erc20::IERC20Mint;
+    use super::IMaliciousERC20Config;
 
-    const ATTACK_CREATOR_CLAIM: u8 = 1;
-    const ATTACK_REFUND: u8 = 2;
-    const SHORT_TRANSFER_FROM: u8 = 3;
+    pub const ATTACK_CREATOR_CLAIM: u8 = 1;
+    pub const ATTACK_COMMISSIONER_REFUND: u8 = 2;
+    pub const SHORT_TRANSFER_FROM: u8 = 3;
 
     component!(path: ERC20Component, storage: erc20, event: ERC20Event);
 
@@ -46,11 +48,8 @@ mod MaliciousERC20 {
     }
 
     #[constructor]
-    fn constructor(ref self: ContractState, name: ByteArray, symbol: ByteArray, supply: u256) {
+    fn constructor(ref self: ContractState, name: ByteArray, symbol: ByteArray) {
         self.erc20.initializer(name, symbol);
-        if supply > 0 {
-            self.erc20.mint(get_caller_address(), supply);
-        }
     }
 
     #[abi(embed_v0)]
@@ -83,6 +82,7 @@ mod MaliciousERC20 {
         ) -> bool {
             let caller = get_caller_address();
             self.erc20._spend_allowance(sender, caller, amount);
+
             let transferred_amount = if self.mode.read() == SHORT_TRANSFER_FROM {
                 amount - 1
             } else {
@@ -120,12 +120,16 @@ mod MaliciousERC20 {
     impl InternalImpl of InternalTrait {
         fn maybe_attack_transfer(ref self: ContractState) {
             let target = self.target.read();
+            if target.is_zero() {
+                return;
+            }
+
             let mode = self.mode.read();
             let escrow = IIPCommissionEscrowDispatcher { contract_address: target };
             if mode == ATTACK_CREATOR_CLAIM {
                 escrow.claim_creator_funds(self.commission_id.read());
             }
-            if mode == ATTACK_REFUND {
+            if mode == ATTACK_COMMISSIONER_REFUND {
                 escrow.claim_commissioner_refund(self.commission_id.read());
             }
         }

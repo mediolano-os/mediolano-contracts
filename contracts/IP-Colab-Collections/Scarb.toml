@@ -5,11 +5,15 @@ edition = "2024_07"
 
 [dependencies]
 starknet = "2.12.0"
-openzeppelin = { git = "https://github.com/OpenZeppelin/cairo-contracts.git", tag = "v0.20.0" }
+openzeppelin_access = "0.20.0"
+openzeppelin_account = "0.20.0"
+openzeppelin_introspection = "0.20.0"
+openzeppelin_token = "0.20.0"
 
 [dev-dependencies]
 snforge_std = "0.59.0"
 assert_macros = "2.12.0"
+openzeppelin_utils = "0.20.0"
 
 [[target.starknet-contract]]
 sierra = true

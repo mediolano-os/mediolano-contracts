@@ -1,13 +1,8 @@
 pub mod IPCollabCollection;
-pub mod IPNft;
+pub mod IPCollabCollectionFactory;
+pub mod interface;
 pub mod types;
 
-pub mod interfaces {
-    pub mod IIPCollaborativeCollection;
-    pub mod IIPNft;
-}
-
-#[cfg(test)]
-mod tests {
-    mod IPCollabCollectionTest;
+pub mod mock {
+    pub mod mock_account;
 }

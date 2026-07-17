@@ -116,6 +116,23 @@ Settings are identity-like private state. They should not become assets unless a
 
 Syndication shares are intentionally market-facing, so transferability is part of the protocol design rather than a side effect of visibility.
 
+### IP Colab Collections
+
+`IP-Colab-Collections` is a per-creator collaborative ERC-721 collection
+(deployed by an ownerless factory): contributors submit content-addressed
+work into owner-defined contribution types, the owner or appointed verifiers
+approve or reject, and each approved contributor mints their own transferable
+piece.
+
+- `asset_standard`: ERC721
+- `asset_role`: approved contribution / collaborative collection piece
+- `transferability`: transferable; the holder can permanently archive a token, freezing transfers
+- `access_semantics`: approval gates minting; ownership is standard ERC-721; royalty receiver is the piece's contributor, immutable
+- `marketplace_visibility`: display/index and tradable as ERC721 assets
+
+Pieces are regular creator works, so transferability and creator royalties
+are part of the protocol design.
+
 ### IP Commission Escrow
 
 `IP-Commission-Escrow` mints a non-transferable ERC-721 offer asset for custom creative work.

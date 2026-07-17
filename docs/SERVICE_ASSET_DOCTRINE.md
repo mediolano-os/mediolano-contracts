@@ -116,6 +116,24 @@ Settings are identity-like private state. They should not become assets unless a
 
 Syndication shares are intentionally market-facing, so transferability is part of the protocol design rather than a side effect of visibility.
 
+### IP Crowdfunding
+
+`IP-Crowfunding` is a per-creator deadline-bound patronage protocol (deployed
+by an ownerless factory): backers contribute until `end_time`, outcomes are
+arithmetic (`total_raised >= goal_amount`), and backers of a successful
+campaign mint a soulbound supporter receipt whose balance equals the amount
+backed. Distinct from IP-Syndication by design: no clock there, transferable
+shares there; a clock here, proof-of-backing here.
+
+- `asset_standard`: ERC1155
+- `asset_role`: soulbound supporter receipt of a successful campaign
+- `transferability`: non-transferable
+- `access_semantics`: receipt balance = amount backed; backers withdraw freely while live; refunds after failure or cancellation are pull-based and unconditional
+- `marketplace_visibility`: display on profiles and creator pages; no listing
+
+The receipt exists for visibility and supporter identity, exactly the
+receipt/proof row of the visibility table — never for trade.
+
 ### IP Commission Escrow
 
 `IP-Commission-Escrow` mints a non-transferable ERC-721 offer asset for custom creative work.
